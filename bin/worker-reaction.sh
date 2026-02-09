@@ -156,12 +156,13 @@ execute_task() {
     local THINKING=$(echo "$TASK_DATA" | cut -d'|' -f4)
     
     # Validate model is available, fallback to default if not
-    # Note: MODEL is not local so calling scope can see actual model used
     MODEL="$REQUESTED_MODEL"
     if ! openclaw models list 2>/dev/null | grep -q "$MODEL"; then
         echo "[$(date '+%H:%M:%S')] ⚠️ Model '$MODEL' not available, using default"
         MODEL="openrouter/moonshotai/kimi-k2.5"  # Default fallback
     fi
+    # Export so parent scope can see actual model used
+    export MODEL
     
     echo "[$(date '+%H:%M:%S')] Executing: ${TASK_DESC:0:50}..."
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
@@ -254,7 +255,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
         TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
-        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${ACTUAL_MODEL} | Thinking: ${TASK_THINKING}"
+        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
             # Try to get token usage from agent output
@@ -268,9 +269,9 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
                 TOKENS_OUT=$(grep -o '"output_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
             fi
             
-            post_result "SUCCESS" "$TASK" "$ACTUAL_MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
+            post_result "SUCCESS" "$TASK" "$MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
         else
-            post_result "FAILED" "$TASK" "$ACTUAL_MODEL" "$TASK_THINKING" "N/A" "N/A"
+            post_result "FAILED" "$TASK" "$MODEL" "$TASK_THINKING" "N/A" "N/A"
         fi
         
         post_status "RESTARTING" "Task complete"
