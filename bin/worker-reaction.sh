@@ -191,16 +191,27 @@ EOF
 post_result() {
     local STATUS="$1"
     local TASK_DATA="$2"
+    local MODEL="$3"
+    local THINKING="$4"
+    local TOKENS_IN="${5:-unknown}"
+    local TOKENS_OUT="${6:-unknown}"
+    
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local RESULT_FILE="/tmp/discord-workers/${WORKER_ID}/${TASK_ID}/RESULT.txt"
     local RESULT=""
     [[ -f "$RESULT_FILE" ]] && RESULT=$(head -c 400 "$RESULT_FILE")
     
-    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${RESULT:0:300}" >> /tmp/discord-tasks/results.txt
+    # Local log with full details
+    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> /tmp/discord-tasks/results.txt
     
+    # Discord message with enhanced info
     local MSG="**[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
+**Model:** ${MODEL}
+**Thinking:** ${THINKING}
+**Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out
+
 \`\`\`
-${RESULT:0:250}
+${RESULT:0:200}
 \`\`\`"
     post_to_discord "$RESULTS_CHANNEL" "$MSG"
 }
@@ -228,12 +239,28 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
     
     if [[ -n "$TASK" ]]; then
         echo "[$(date '+%H:%M:%S')] Task: ${TASK:0:40}..."
-        post_status "CLAIMED" "Task ${TASK%%|*}"
+        
+        # Extract task details for reporting
+        local TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
+        local TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
+        
+        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
-            post_result "SUCCESS" "$TASK"
+            # Try to get token usage from agent output
+            local TOKENS_IN="unknown"
+            local TOKENS_OUT="unknown"
+            
+            # Look for token usage in agent output
+            if [[ -f agent-output.log ]]; then
+                # Try to extract from OpenClaw output (format varies)
+                TOKENS_IN=$(grep -o '"input_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
+                TOKENS_OUT=$(grep -o '"output_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
+            fi
+            
+            post_result "SUCCESS" "$TASK" "$TASK_MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
         else
-            post_result "FAILED" "$TASK"
+            post_result "FAILED" "$TASK" "$TASK_MODEL" "$TASK_THINKING" "N/A" "N/A"
         fi
         
         post_status "RESTARTING" "Task complete"

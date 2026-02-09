@@ -31,6 +31,9 @@ MSG="${TASK}"
 
 echo "Submitting to Discord #task-queue..."
 echo "  Task: ${TASK:0:50}..."
+[[ -n "$MODEL" ]] && echo "  Model: $MODEL"
+[[ -n "$THINKING" ]] && echo "  Thinking: $THINKING"
+echo ""
 
 if [[ -n "${CHIP_TOKEN:-}" && -n "${TASK_QUEUE_CHANNEL:-}" ]]; then
     RESPONSE=$(curl -s -X POST \
