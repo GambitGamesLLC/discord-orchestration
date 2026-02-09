@@ -5,9 +5,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if [[ -f "${SCRIPT_DIR}/discord-config.env" ]]; then
-    source "${SCRIPT_DIR}/discord-config.env"
+if [[ -f "${REPO_DIR}/discord-config.env" ]]; then
+    source "${REPO_DIR}/discord-config.env"
 fi
 
 TASK="${1:-}"

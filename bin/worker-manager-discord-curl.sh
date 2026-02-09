@@ -5,10 +5,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Load config
-if [[ -f "${SCRIPT_DIR}/discord-config.env" ]]; then
-    source "${SCRIPT_DIR}/discord-config.env"
+if [[ -f "${REPO_DIR}/discord-config.env" ]]; then
+    source "${REPO_DIR}/discord-config.env"
 fi
 
 WORKERS="${WORKERS:-3}"
@@ -59,7 +60,7 @@ start_worker() {
         export POLL_INTERVAL="5"
         export MAX_IDLE_TIME="300"
         
-        bash "${SCRIPT_DIR}/worker-discord-curl.sh" > >(sed "s/^/[${WORKER_ID}] /") 2>&1 &
+        bash "${SCRIPT_DIR}/worker-reaction.sh" > >(sed "s/^/[${WORKER_ID}] /") 2>&1 &
         local PID=$!
         WORKER_PIDS[$WORKER_ID]=$PID
         
@@ -90,8 +91,8 @@ shutdown() {
 trap shutdown SIGINT SIGTERM
 
 # Check for config
-if [[ ! -f "${SCRIPT_DIR}/discord-config.env" ]]; then
-    warn "Config file not found: ${SCRIPT_DIR}/discord-config.env"
+if [[ ! -f "${REPO_DIR}/discord-config.env" ]]; then
+    warn "Config file not found: ${REPO_DIR}/discord-config.env"
     warn "Run ./setup-discord.sh first"
     exit 1
 fi
