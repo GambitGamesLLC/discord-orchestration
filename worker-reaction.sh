@@ -53,8 +53,9 @@ get_task_via_reactions() {
     
     [[ -z "$MESSAGES" ]] && return 0
     
-    # Parse each message
-    echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | sed 's/"id":"//;s/"$//' | while read -r MSG_ID; do
+    # Parse each message ID (only top-level message IDs, not nested user IDs)
+    # Messages are in format: {"id":"12345","content":"...",...}
+    echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | head -10 | sed 's/"id":"//;s/"$//' | while read -r MSG_ID; do
         # Check if already has ✅ reaction
         local REACTIONS
         REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
@@ -62,7 +63,7 @@ get_task_via_reactions() {
         # If no reactions yet, try to claim
         if [[ -z "$REACTIONS" ]] || ! echo "$REACTIONS" | grep -q '"id"'; then
             # Try to add ✅ reaction (atomic claim)
-            echo "[$(date '+%H:%M:%S')] Attempting to claim task ${MSG_ID:0:12}..."
+            echo "[$(date '+%H:%M:%S')] Attempting to claim task ${MSG_ID:0:12}..." >&2
             
             local CLAIM_RESPONSE
             CLAIM_RESPONSE=$(curl -s -X PUT \
@@ -71,13 +72,13 @@ get_task_via_reactions() {
             
             # If successful (empty response), we claimed it
             if [[ -z "$CLAIM_RESPONSE" ]]; then
-                echo "[$(date '+%H:%M:%S')] ✅ Claimed task via reaction (MSG: ${MSG_ID:0:12}...)"
+                echo "[$(date '+%H:%M:%S')] ✅ Claimed task via reaction (MSG: ${MSG_ID:0:12}...)" >&2
                 
                 # Get message content
                 local MSG_DATA
                 MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
             else
-                echo "[$(date '+%H:%M:%S')] ⚠️ Failed to claim ${MSG_ID:0:12}: ${CLAIM_RESPONSE:0:50}"
+                echo "[$(date '+%H:%M:%S')] ⚠️ Failed to claim ${MSG_ID:0:12}: ${CLAIM_RESPONSE:0:50}" >&2
                 
                 local CONTENT
                 CONTENT=$(echo "$MSG_DATA" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//')
