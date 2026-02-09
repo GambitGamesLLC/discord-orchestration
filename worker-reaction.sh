@@ -209,10 +209,10 @@ post_status() {
 echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} starting..."
 post_status "READY" "Online and waiting"
 
-local IDLE_TIME=0
+IDLE_TIME=0
 while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
     # Try Discord first, then file fallback
-    local TASK=$(get_task_via_reactions)
+    TASK=$(get_task_via_reactions)
     
     if [[ -z "$TASK" ]]; then
         TASK=$(get_task_from_file)
@@ -224,7 +224,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         
         # Add 🔄 reaction to show in-progress
         if [[ "$TASK" == discord-* ]]; then
-            local MSG_ID="${TASK:8}"  # Remove "discord-" prefix
+            MSG_ID="${TASK:8}"  # Remove "discord-" prefix
             MSG_ID="${MSG_ID%%|*}"    # Get just the ID
             discord_api PUT "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%F0%9F%94%84/@me" > /dev/null 2>&1 || true
         fi
