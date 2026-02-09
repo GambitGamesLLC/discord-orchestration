@@ -1,8 +1,6 @@
 #!/bin/bash
 #
-# worker-reaction.sh - Reaction-based task claiming
-#
-# Workers claim tasks by adding ✅ reaction (atomic operation)
+# worker-reaction-fixed.sh - Fixed reaction-based task claiming
 
 set -euo pipefail
 
@@ -43,7 +41,7 @@ post_to_discord() {
     discord_api POST "/channels/${CHANNEL}/messages" "{\"content\":\"${JSON_MSG}\"}" > /dev/null
 }
 
-# Check for tasks via reactions
+# Check for tasks via reactions - outputs ONLY the task or nothing
 get_task_via_reactions() {
     [[ -z "$BOT_TOKEN" || -z "$TASK_QUEUE_CHANNEL" ]] && return 0
     
@@ -53,18 +51,23 @@ get_task_via_reactions() {
     
     [[ -z "$MESSAGES" ]] && return 0
     
-    # Parse each message ID (only top-level message IDs, not nested user IDs)
-    # Messages are in format: {"id":"12345","content":"...",...}
-    echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | head -10 | sed 's/"id":"//;s/"$//' | while read -r MSG_ID; do
+    # Get message IDs (one per line)
+    local MSG_IDS
+    MSG_IDS=$(echo "$MESSAGES" | python3 -c "import json,sys; data=json.load(sys.stdin); [print(m['id']) for m in data]" 2>/dev/null)
+    
+    [[ -z "$MSG_IDS" ]] && return 0
+    
+    # Check each message
+    while IFS= read -r MSG_ID; do
+        [[ -z "$MSG_ID" ]] && continue
+        
         # Check if already has ✅ reaction
         local REACTIONS
         REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
         
         # If no reactions yet, try to claim
-        if [[ -z "$REACTIONS" ]] || ! echo "$REACTIONS" | grep -q '"id"'; then
+        if [[ -z "$REACTIONS" ]] || [[ "$REACTIONS" == "[]" ]]; then
             # Try to add ✅ reaction (atomic claim)
-            echo "[$(date '+%H:%M:%S')] Attempting to claim task ${MSG_ID:0:12}..." >&2
-            
             local CLAIM_RESPONSE
             CLAIM_RESPONSE=$(curl -s -X PUT \
                 -H "Authorization: Bot ${BOT_TOKEN}" \
@@ -72,16 +75,12 @@ get_task_via_reactions() {
             
             # If successful (empty response), we claimed it
             if [[ -z "$CLAIM_RESPONSE" ]]; then
-                echo "[$(date '+%H:%M:%S')] ✅ Claimed task via reaction (MSG: ${MSG_ID:0:12}...)" >&2
-                
                 # Get message content
                 local MSG_DATA
                 MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
-            else
-                echo "[$(date '+%H:%M:%S')] ⚠️ Failed to claim ${MSG_ID:0:12}: ${CLAIM_RESPONSE:0:50}" >&2
                 
                 local CONTENT
-                CONTENT=$(echo "$MSG_DATA" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//')
+                CONTENT=$(echo "$MSG_DATA" | python3 -c "import json,sys; print(json.load(sys.stdin)['content'])" 2>/dev/null)
                 
                 if [[ -n "$CONTENT" ]]; then
                     # Parse task
@@ -103,16 +102,18 @@ get_task_via_reactions() {
                     
                     TASK_DESC=$(echo "$TASK_DESC" | sed 's/^ *//;s/ *$//')
                     
-                    # Return task
+                    # Output ONLY the task (this goes to stdout)
                     echo "discord-${MSG_ID}|${TASK_DESC}|${MODEL}|${THINKING}"
                     return 0
                 fi
             fi
         fi
-    done
+    done <<< "$MSG_IDS"
+    
+    return 0
 }
 
-# Fallback to file-based
+# Fallback to file-based - outputs ONLY the task or nothing
 get_task_from_file() {
     local QUEUE_FILE="/tmp/discord-tasks/queue.txt"
     local CLAIMED_FILE="/tmp/discord-tasks/claimed.txt"
@@ -228,13 +229,6 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
     if [[ -n "$TASK" ]]; then
         echo "[$(date '+%H:%M:%S')] Task: ${TASK:0:40}..."
         post_status "CLAIMED" "Task ${TASK%%|*}"
-        
-        # Add 🔄 reaction to show in-progress
-        if [[ "$TASK" == discord-* ]]; then
-            MSG_ID="${TASK:8}"  # Remove "discord-" prefix
-            MSG_ID="${MSG_ID%%|*}"    # Get just the ID
-            discord_api PUT "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%F0%9F%94%84/@me" > /dev/null 2>&1 || true
-        fi
         
         if execute_task "$TASK"; then
             post_result "SUCCESS" "$TASK"
