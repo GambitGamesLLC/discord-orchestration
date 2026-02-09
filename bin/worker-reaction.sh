@@ -156,14 +156,12 @@ execute_task() {
     local THINKING=$(echo "$TASK_DATA" | cut -d'|' -f4)
     
     # Validate model is available, fallback to default if not
-    local MODEL="$REQUESTED_MODEL"
+    # Note: MODEL is not local so calling scope can see actual model used
+    MODEL="$REQUESTED_MODEL"
     if ! openclaw models list 2>/dev/null | grep -q "$MODEL"; then
         echo "[$(date '+%H:%M:%S')] ⚠️ Model '$MODEL' not available, using default"
         MODEL="openrouter/moonshotai/kimi-k2.5"  # Default fallback
     fi
-    
-    # Export MODEL so post_result can see actual model used
-    export ACTUAL_MODEL="$MODEL"
     
     echo "[$(date '+%H:%M:%S')] Executing: ${TASK_DESC:0:50}..."
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
