@@ -155,12 +155,15 @@ execute_task() {
     local REQUESTED_MODEL=$(echo "$TASK_DATA" | cut -d'|' -f3)
     local THINKING=$(echo "$TASK_DATA" | cut -d'|' -f4)
     
-    # Validate model is available, fallback to default if not
-    MODEL="$REQUESTED_MODEL"
-    if ! openclaw models list 2>/dev/null | grep -q "$MODEL"; then
-        echo "[$(date '+%H:%M:%S')] ⚠️ Model '$MODEL' not available, using default"
-        MODEL="openrouter/moonshotai/kimi-k2.5"  # Default fallback
+    # Local agent always uses default model from config
+    # Get actual default model
+    DEFAULT_MODEL=$(cat ~/.openclaw/openclaw.json 2>/dev/null | grep '"primary"' | cut -d'"' -f4 || echo "unknown")
+    MODEL="${DEFAULT_MODEL:-openrouter/moonshotai/kimi-k2.5}"
+    
+    if [[ "$REQUESTED_MODEL" != "$MODEL" ]]; then
+        echo "[$(date '+%H:%M:%S')] ℹ️ Requested '$REQUESTED_MODEL' but local agent uses default: $MODEL"
     fi
+    
     # Export so parent scope can see actual model used
     export MODEL
     
@@ -186,7 +189,6 @@ EOF
     if timeout 120 openclaw agent --local \
         --session-id "${WORKER_ID}-${TASK_ID}" \
         --message "Complete the task in TASK.txt. Write result to RESULT.txt." \
-        --model "$MODEL" \
         --thinking "$THINKING" \
         > agent-output.log 2>&1; then
         
