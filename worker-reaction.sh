@@ -62,6 +62,8 @@ get_task_via_reactions() {
         # If no reactions yet, try to claim
         if [[ -z "$REACTIONS" ]] || ! echo "$REACTIONS" | grep -q '"id"'; then
             # Try to add ✅ reaction (atomic claim)
+            echo "[$(date '+%H:%M:%S')] Attempting to claim task ${MSG_ID:0:12}..."
+            
             local CLAIM_RESPONSE
             CLAIM_RESPONSE=$(curl -s -X PUT \
                 -H "Authorization: Bot ${BOT_TOKEN}" \
@@ -69,9 +71,13 @@ get_task_via_reactions() {
             
             # If successful (empty response), we claimed it
             if [[ -z "$CLAIM_RESPONSE" ]]; then
+                echo "[$(date '+%H:%M:%S')] ✅ Claimed task via reaction (MSG: ${MSG_ID:0:12}...)"
+                
                 # Get message content
                 local MSG_DATA
                 MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
+            else
+                echo "[$(date '+%H:%M:%S')] ⚠️ Failed to claim ${MSG_ID:0:12}: ${CLAIM_RESPONSE:0:50}"
                 
                 local CONTENT
                 CONTENT=$(echo "$MSG_DATA" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//')
