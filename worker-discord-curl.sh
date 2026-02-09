@@ -42,35 +42,83 @@ post_to_discord() {
 }
 
 check_discord_for_task() {
-    # For now, use file-based queue
+    # Try Discord first, fall back to file
+    
+    local BOT_TOKEN="${BOT_TOKEN:-}"
+    local TASK_QUEUE_CHANNEL="${TASK_QUEUE_CHANNEL:-}"
+    
+    if [[ -n "$BOT_TOKEN" && -n "$TASK_QUEUE_CHANNEL" ]]; then
+        # Try to fetch from Discord
+        local MESSAGES
+        MESSAGES=$(curl -s -H "Authorization: Bot ${BOT_TOKEN}" \
+            "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages?limit=10" 2>/dev/null || echo "")
+        
+        if [[ -n "$MESSAGES" ]] && echo "$MESSAGES" | grep -q '"id"'; then
+            # Parse first message that looks like a task
+            # Format expected: "Task: description | Model: xxx | Thinking: yyy"
+            local MSG_CONTENT
+            MSG_CONTENT=$(echo "$MESSAGES" | grep -o '"content":"[^"]*"' | head -1 | sed 's/"content":"//;s/"$//')
+            
+            local MSG_ID
+            MSG_ID=$(echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | head -1 | sed 's/"id":"//;s/"$//')
+            
+            if [[ -n "$MSG_CONTENT" && -n "$MSG_ID" ]]; then
+                # Parse task from message
+                # Expected format: "Write hello world in Python [model:gpt-4o] [thinking:medium]"
+                local TASK_DESC="$MSG_CONTENT"
+                local MODEL="openrouter/moonshotai/kimi-k2.5"
+                local THINKING="medium"
+                
+                # Extract model if specified [model:xxx]
+                if [[ "$MSG_CONTENT" =~ \[model:([^\]]+)\] ]]; then
+                    MODEL="${BASH_REMATCH[1]}"
+                    TASK_DESC="${TASK_DESC/\[model:$MODEL\]/}"
+                fi
+                
+                # Extract thinking if specified [thinking:xxx]
+                if [[ "$MSG_CONTENT" =~ \[thinking:([^\]]+)\] ]]; then
+                    THINKING="${BASH_REMATCH[1]}"
+                    TASK_DESC="${TASK_DESC/\[thinking:$THINKING\]/}"
+                fi
+                
+                # Trim whitespace
+                TASK_DESC=$(echo "$TASK_DESC" | sed 's/^ *//;s/ *$//')
+                
+                # Generate task ID from message
+                local TASK_ID="discord-${MSG_ID}"
+                
+                # Delete message from queue (claim it)
+                curl -s -X DELETE \
+                    -H "Authorization: Bot ${BOT_TOKEN}" \
+                    "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}" \
+                    > /dev/null 2>&1
+                
+                # Return task
+                echo "${TASK_ID}|${TASK_DESC}|${MODEL}|${THINKING}"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Fallback to file-based queue
     QUEUE_FILE="/tmp/discord-tasks/queue.txt"
     CLAIMED_FILE="/tmp/discord-tasks/claimed.txt"
     LOCK_FILE="/tmp/discord-tasks/queue.lock"
     
-    # Ensure directories exist
-    if ! mkdir -p "$(dirname "$QUEUE_FILE")" 2>/dev/null; then
-        echo "ERROR: Cannot create directory" >&2
-        return 0  # Return empty, don't crash
-    fi
-    
+    mkdir -p "$(dirname "$QUEUE_FILE")" 2>/dev/null || true
     touch "$QUEUE_FILE" "$CLAIMED_FILE" 2>/dev/null || true
     
-    # Check if queue is empty
     if [[ ! -s "$QUEUE_FILE" ]]; then
-        return 0  # Empty result
+        return 0
     fi
     
-    # Try to acquire lock (non-blocking)
     if ! mkdir "$LOCK_FILE" 2>/dev/null; then
-        # Another worker has the lock
-        return 0  # Try again next poll
+        return 0
     fi
     
-    # We have the lock - find unclaimed task
     local found_task=""
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" ]] && continue
-        
         local task_id
         task_id=$(echo "$line" | cut -d'|' -f1)
         [[ -z "$task_id" ]] && continue
@@ -82,10 +130,7 @@ check_discord_for_task() {
         fi
     done < "$QUEUE_FILE"
     
-    # Release lock
     rm -rf "$LOCK_FILE" 2>/dev/null || true
-    
-    # Return found task (or empty if none)
     echo "$found_task"
     return 0
 }
