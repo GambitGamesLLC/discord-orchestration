@@ -241,15 +241,15 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         echo "[$(date '+%H:%M:%S')] Task: ${TASK:0:40}..."
         
         # Extract task details for reporting
-        local TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
-        local TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
+        TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
+        TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
         post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
             # Try to get token usage from agent output
-            local TOKENS_IN="unknown"
-            local TOKENS_OUT="unknown"
+            TOKENS_IN="unknown"
+            TOKENS_OUT="unknown"
             
             # Look for token usage in agent output
             if [[ -f agent-output.log ]]; then
