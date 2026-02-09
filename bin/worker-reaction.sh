@@ -152,10 +152,21 @@ execute_task() {
     local TASK_DATA="$1"
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
-    local MODEL=$(echo "$TASK_DATA" | cut -d'|' -f3)
+    local REQUESTED_MODEL=$(echo "$TASK_DATA" | cut -d'|' -f3)
     local THINKING=$(echo "$TASK_DATA" | cut -d'|' -f4)
     
+    # Validate model is available, fallback to default if not
+    local MODEL="$REQUESTED_MODEL"
+    if ! openclaw models list 2>/dev/null | grep -q "$MODEL"; then
+        echo "[$(date '+%H:%M:%S')] ⚠️ Model '$MODEL' not available, using default"
+        MODEL="openrouter/moonshotai/kimi-k2.5"  # Default fallback
+    fi
+    
+    # Export MODEL so post_result can see actual model used
+    export ACTUAL_MODEL="$MODEL"
+    
     echo "[$(date '+%H:%M:%S')] Executing: ${TASK_DESC:0:50}..."
+    echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
     
     local WORKSPACE="/tmp/discord-workers/${WORKER_ID}/${TASK_ID}"
     mkdir -p "$WORKSPACE"
@@ -176,6 +187,7 @@ EOF
     if timeout 120 openclaw agent --local \
         --session-id "${WORKER_ID}-${TASK_ID}" \
         --message "Complete the task in TASK.txt. Write result to RESULT.txt." \
+        --model "$MODEL" \
         --thinking "$THINKING" \
         > agent-output.log 2>&1; then
         
@@ -244,7 +256,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
         TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
-        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
+        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${ACTUAL_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
             # Try to get token usage from agent output
@@ -258,9 +270,9 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
                 TOKENS_OUT=$(grep -o '"output_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
             fi
             
-            post_result "SUCCESS" "$TASK" "$TASK_MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
+            post_result "SUCCESS" "$TASK" "$ACTUAL_MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
         else
-            post_result "FAILED" "$TASK" "$TASK_MODEL" "$TASK_THINKING" "N/A" "N/A"
+            post_result "FAILED" "$TASK" "$ACTUAL_MODEL" "$TASK_THINKING" "N/A" "N/A"
         fi
         
         post_status "RESTARTING" "Task complete"
