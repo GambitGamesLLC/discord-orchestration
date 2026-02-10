@@ -1,0 +1,35 @@
+# Discord Bot Tokens - NEVER commit these
+discord-config.env
+.env
+*.env
+
+# Environment files
+.env.local
+.env.*.local
+
+# OpenClaw config with tokens
+openclaw.json
+
+# Logs
+*.log
+logs/
+
+# Temp files
+/tmp/
+/tmp-discord-tasks/
+/tmp-discord-workers/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+tests/tmp/
+*.tmp
