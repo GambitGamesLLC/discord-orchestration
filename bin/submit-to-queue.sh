@@ -24,11 +24,6 @@ THINKING="${3:-}"
     exit 1
 }
 
-# Build message with optional tags
-MSG="${TASK}"
-[[ -n "$MODEL" ]] && MSG="${MSG} [model:${MODEL}]"
-[[ -n "$THINKING" ]] && MSG="${MSG} [thinking:${THINKING}]"
-
 echo "Submitting to Discord #task-queue..."
 echo "  Task: ${TASK:0:50}..."
 [[ -n "$MODEL" ]] && echo "  Model: $MODEL"
@@ -36,14 +31,28 @@ echo "  Task: ${TASK:0:50}..."
 echo ""
 
 if [[ -n "${CHIP_TOKEN:-}" && -n "${TASK_QUEUE_CHANNEL:-}" ]]; then
+    # Submit task and get the message ID (which becomes the task ID)
     RESPONSE=$(curl -s -X POST \
         -H "Authorization: Bot ${CHIP_TOKEN}" \
         -H "Content-Type: application/json" \
-        -d "{\"content\":\"${MSG}\"}" \
+        -d "{\"content\":\"${TASK}\"}" \
         "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages" 2>/dev/null)
     
-    if echo "$RESPONSE" | grep -q '"id"'; then
-        echo "✅ Task posted to #task-queue"
+    TASK_ID=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+    
+    if [[ -n "$TASK_ID" ]]; then
+        # Edit the message to include the task ID at the top
+        MSG_WITH_ID="**[Task: ${TASK_ID}]** ${TASK}"
+        [[ -n "$MODEL" ]] && MSG_WITH_ID="${MSG_WITH_ID} [model:${MODEL}]"
+        [[ -n "$THINKING" ]] && MSG_WITH_ID="${MSG_WITH_ID} [thinking:${THINKING}]"
+        
+        curl -s -X PATCH \
+            -H "Authorization: Bot ${CHIP_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":\"${MSG_WITH_ID}\"}" \
+            "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${TASK_ID}" > /dev/null 2>&1
+        
+        echo "✅ Task posted to #task-queue (ID: ${TASK_ID})"
         echo "   Workers will pick it up via reaction claiming"
     else
         echo "❌ Failed: ${RESPONSE:0:100}"

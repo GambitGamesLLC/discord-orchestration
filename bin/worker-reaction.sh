@@ -11,6 +11,8 @@ RESULTS_CHANNEL="${RESULTS_CHANNEL:-}"
 WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-300}"
+MY_USER_ID=""  # Cached bot user ID for first-reactor-wins logic
+LOST_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-lost-messages.txt"  # Cache messages we've lost on
 
 # Discord API helper
 discord_api() {
@@ -57,55 +59,113 @@ get_task_via_reactions() {
     
     [[ -z "$MSG_IDS" ]] && return 0
     
+    # Ensure lost messages cache directory exists
+    mkdir -p "$(dirname "$LOST_MESSAGES_FILE")" 2>/dev/null || true
+    
     # Check each message
     while IFS= read -r MSG_ID; do
         [[ -z "$MSG_ID" ]] && continue
         
-        # Check if already has ✅ reaction
-        local REACTIONS
-        REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
+        # Skip messages we've already lost on
+        if [[ -f "$LOST_MESSAGES_FILE" ]] && grep -q "^${MSG_ID}$" "$LOST_MESSAGES_FILE" 2>/dev/null; then
+            continue
+        fi
         
-        # If no reactions yet, try to claim
-        if [[ -z "$REACTIONS" ]] || [[ "$REACTIONS" == "[]" ]]; then
-            # Try to add ✅ reaction (atomic claim)
-            local CLAIM_RESPONSE
-            CLAIM_RESPONSE=$(curl -s -X PUT \
-                -H "Authorization: Bot ${BOT_TOKEN}" \
-                "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" 2>&1)
+        # First-reactor-wins: Always try to add reaction, then verify
+        # Step 1: Add our ✅ reaction (attempt claim)
+        local CLAIM_RESPONSE
+        CLAIM_RESPONSE=$(curl -s -X PUT \
+            -H "Authorization: Bot ${BOT_TOKEN}" \
+            "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" 2>&1)
+        
+        # If we successfully added reaction, verify we're first (double-check)
+        if [[ -z "$CLAIM_RESPONSE" ]]; then
+            # Step 2: First check with short jitter
+            local JITTER=$((100 + RANDOM % 200))  # 100-300ms
+            sleep "0.${JITTER}"
             
-            # If successful (empty response), we claimed it
-            if [[ -z "$CLAIM_RESPONSE" ]]; then
-                # Get message content
-                local MSG_DATA
-                MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
+            # Get our user ID if not cached
+            if [[ -z "$MY_USER_ID" ]]; then
+                MY_USER_ID=$(discord_api GET "/users/@me" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+            fi
+            
+            # Step 3: First verification - check reaction list
+            local REACTIONS
+            REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
+            
+            local FIRST_REACTOR
+            FIRST_REACTOR=$(echo "$REACTIONS" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data and len(data) > 0:
+        print(data[0].get('id', ''))
+except:
+    pass
+" 2>/dev/null)
+            
+            # Step 4: If not first, we lost
+            if [[ -n "$FIRST_REACTOR" && -n "$MY_USER_ID" && "$FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                echo "[$(date '+%H:%M:%S')] Lost race (check 1) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
+                continue
+            fi
+            
+            # Step 5: Double-check verification - wait again and re-verify
+            # This catches eventual consistency issues in Discord's API
+            sleep 0.3
+            
+            local REACTIONS2
+            REACTIONS2=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
+            
+            local FIRST_REACTOR2
+            FIRST_REACTOR2=$(echo "$REACTIONS2" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data and len(data) > 0:
+        print(data[0].get('id', ''))
+except:
+    pass
+" 2>/dev/null)
+            
+            # Step 6: Second verification - if not first, we lost
+            if [[ -n "$FIRST_REACTOR2" && -n "$MY_USER_ID" && "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
+                echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR2:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
+                continue
+            fi
+            
+            # Step 6: We won! Get message content and return task
+            local MSG_DATA
+            MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
+            
+            local CONTENT
+            CONTENT=$(echo "$MSG_DATA" | python3 -c "import json,sys; print(json.load(sys.stdin)['content'])" 2>/dev/null)
+            
+            if [[ -n "$CONTENT" ]]; then
+                # Parse task
+                local TASK_DESC="$CONTENT"
+                local MODEL="openrouter/moonshotai/kimi-k2.5"
+                local THINKING="medium"
                 
-                local CONTENT
-                CONTENT=$(echo "$MSG_DATA" | python3 -c "import json,sys; print(json.load(sys.stdin)['content'])" 2>/dev/null)
-                
-                if [[ -n "$CONTENT" ]]; then
-                    # Parse task
-                    local TASK_DESC="$CONTENT"
-                    local MODEL="openrouter/moonshotai/kimi-k2.5"
-                    local THINKING="medium"
-                    
-                    # Extract model [model:xxx]
-                    if [[ "$CONTENT" =~ \[model:([^\]]+)\] ]]; then
-                        MODEL="${BASH_REMATCH[1]}"
-                        TASK_DESC="${TASK_DESC/\[model:$MODEL\]/}"
-                    fi
-                    
-                    # Extract thinking [thinking:xxx]
-                    if [[ "$CONTENT" =~ \[thinking:([^\]]+)\] ]]; then
-                        THINKING="${BASH_REMATCH[1]}"
-                        TASK_DESC="${TASK_DESC/\[thinking:$THINKING\]/}"
-                    fi
-                    
-                    TASK_DESC=$(echo "$TASK_DESC" | sed 's/^ *//;s/ *$//')
-                    
-                    # Output ONLY the task (this goes to stdout)
-                    echo "discord-${MSG_ID}|${TASK_DESC}|${MODEL}|${THINKING}"
-                    return 0
+                # Extract model [model:xxx]
+                if [[ "$CONTENT" =~ \[model:([^\]]+)\] ]]; then
+                    MODEL="${BASH_REMATCH[1]}"
+                    TASK_DESC="${TASK_DESC/\[model:$MODEL\]/}"
                 fi
+                
+                # Extract thinking [thinking:xxx]
+                if [[ "$CONTENT" =~ \[thinking:([^\]]+)\] ]]; then
+                    THINKING="${BASH_REMATCH[1]}"
+                    TASK_DESC="${TASK_DESC/\[thinking:$THINKING\]/}"
+                fi
+                
+                TASK_DESC=$(echo "$TASK_DESC" | sed 's/^ *//;s/ *$//')
+                
+                # Output ONLY the task (this goes to stdout)
+                echo "discord-${MSG_ID}|${TASK_DESC}|${MODEL}|${THINKING}"
+                return 0
             fi
         fi
     done <<< "$MSG_IDS"
@@ -170,31 +230,48 @@ execute_task() {
     echo "[$(date '+%H:%M:%S')] Executing: ${TASK_DESC:0:50}..."
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
     
-    local WORKSPACE="/tmp/discord-workers/${WORKER_ID}/${TASK_ID}"
-    mkdir -p "$WORKSPACE"
+    # Gateway-attached worker: uses OpenClaw default workspace (no sandbox)
+    # Workers now have full filesystem access like standard OpenClaw agents
+    local WORKSPACE="$HOME/.openclaw/workspace"
+    local TASK_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
     
-    cat > "$WORKSPACE/TASK.txt" << EOF
-TASK: ${TASK_DESC}
-EOF
-
-    cat > "$WORKSPACE/AGENTS.md" << EOF
+    # Create task subfolder for outputs
+    mkdir -p "$TASK_DIR"
+    
+    # IMPORTANT: openclaw agent always uses root workspace, so we write task files there
+    # Backup any existing AGENTS.md first
+    if [[ -f "${WORKSPACE}/AGENTS.md" ]]; then
+        mv "${WORKSPACE}/AGENTS.md" "${WORKSPACE}/AGENTS.md.backup.$$" 2>/dev/null || true
+    fi
+    
+    cat > "${WORKSPACE}/AGENTS.md" << EOF
 # Worker ${WORKER_ID}
 Task: ${TASK_DESC}
 Write result to RESULT.txt
 EOF
 
-    cd "$WORKSPACE"
-    cp AGENTS.md TASK.txt "$HOME/.openclaw/workspace/" 2>/dev/null || true
+    cat > "${WORKSPACE}/TASK.txt" << EOF
+TASK: ${TASK_DESC}
+EOF
+
+    # Also copy to task dir for reference
+    cp "${WORKSPACE}/AGENTS.md" "${WORKSPACE}/TASK.txt" "$TASK_DIR/"
     
-    if timeout 120 openclaw agent --local \
+    cd "$TASK_DIR"
+    
+    # Gateway-attached agent (no --local flag) - full filesystem access
+    if timeout 120 openclaw agent \
         --session-id "${WORKER_ID}-${TASK_ID}" \
-        --message "Complete the task in TASK.txt. Write result to RESULT.txt." \
+        --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
         --thinking "$THINKING" \
         > agent-output.log 2>&1; then
         
-        local OPENCLAW_RESULT="$HOME/.openclaw/workspace/RESULT.txt"
-        if [[ -f "$OPENCLAW_RESULT" ]]; then
-            cp "$OPENCLAW_RESULT" RESULT.txt
+        # Check for RESULT.txt in task dir (agent may write it there if instructed)
+        # or in root workspace (default behavior)
+        if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
+            return 0
+        elif [[ -f "${WORKSPACE}/RESULT.txt" ]]; then
+            cp "${WORKSPACE}/RESULT.txt" "${TASK_DIR}/RESULT.txt"
             return 0
         fi
     fi
@@ -210,22 +287,46 @@ post_result() {
     local TOKENS_OUT="${6:-unknown}"
     
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
-    local RESULT_FILE="/tmp/discord-workers/${WORKER_ID}/${TASK_ID}/RESULT.txt"
+    local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
+    
+    # Updated path for non-sandboxed (gateway-attached) workers
+    # Try task dir first, fallback to root workspace
+    local RESULT_FILE="$HOME/.openclaw/workspace/worker-${WORKER_ID}-${TASK_ID}/RESULT.txt"
+    [[ ! -f "$RESULT_FILE" ]] && RESULT_FILE="$HOME/.openclaw/workspace/RESULT.txt"
     local RESULT=""
-    [[ -f "$RESULT_FILE" ]] && RESULT=$(head -c 400 "$RESULT_FILE")
+    [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
     
     # Local log with full details
     echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> /tmp/discord-tasks/results.txt
     
-    # Discord message with enhanced info
+    # Build debug info with task details
+    local WORKSPACE_DIR="$HOME/.openclaw/workspace/worker-${WORKER_ID}-${TASK_ID}"
+    local DEBUG_INFO=""
+    
+    # List modified files in workspace
+    if [[ -d "$WORKSPACE_DIR" ]]; then
+        local FILES=$(ls -1 "$WORKSPACE_DIR" 2>/dev/null | head -10 | tr '\n' ', ')
+        [[ -n "$FILES" ]] && DEBUG_INFO="\n**Files:** ${FILES%, }"
+    fi
+    
+    # Discord message with enhanced info and full details
+    # Use 3 backticks for proper Discord code block rendering
     local MSG="**[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
-**Model:** ${MODEL}
-**Thinking:** ${THINKING}
-**Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out
+**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out
 
+**Task Prompt:**
 \`\`\`
-${RESULT:0:200}
-\`\`\`"
+${TASK_DESC:0:500}
+${TASK_DESC:500:+... (truncated)}
+\`\`\`
+
+**Result:**
+\`\`\`
+${RESULT:0:800}
+\`\`\`${DEBUG_INFO}
+
+📁 **Workspace:** \`${WORKSPACE_DIR}\`"
+    
     post_to_discord "$RESULTS_CHANNEL" "$MSG"
 }
 
@@ -238,8 +339,8 @@ post_status() {
 }
 
 # Main
-echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} starting..."
-post_status "READY" "Online and waiting"
+echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} starting (gateway-attached, full filesystem access)..."
+post_status "READY" "Online and waiting (non-sandboxed)"
 
 IDLE_TIME=0
 while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
@@ -257,7 +358,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
         TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
-        post_status "CLAIMED" "Task ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
+        post_status "CLAIMED" "Task ID: ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
             # Try to get token usage from agent output
