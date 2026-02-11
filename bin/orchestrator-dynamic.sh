@@ -1,7 +1,6 @@
 #!/bin/bash
 #
 # orchestrator-dynamic.sh - Dynamic agent spawning orchestrator
-# Connects to running Gateway (like old workers)
 
 set -euo pipefail
 
@@ -43,7 +42,7 @@ discord_api() {
     fi
 }
 
-# Get unassigned tasks from queue
+# Get unassigned tasks
 get_pending_tasks() {
     local MESSAGES
     MESSAGES=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages?limit=20")
@@ -125,15 +124,6 @@ spawn_agent() {
     # Create workspace
     mkdir -p "$AGENT_DIR"
     
-    # Write task file
-    cat > "${AGENT_DIR}/TASK.txt" << EOF
-TASK ID: ${TASK_ID}
-MODEL: ${MODEL}
-THINKING: ${THINKING}
-
-${TASK_DESC}
-EOF
-
     # Map model alias
     local MODEL_FLAG=""
     case "$MODEL" in
@@ -157,19 +147,35 @@ EOF
             ;;
     esac
     
+    # Write AGENTS.md (critical - tells agent what to do)
+    cat > "${AGENT_DIR}/AGENTS.md" << EOF
+# Agent ${AGENT_ID}
+
+## Task
+${TASK_DESC}
+
+## Model
+${MODEL_FLAG}
+
+## Instructions
+Complete the task and write the result to RESULT.txt in ${AGENT_DIR}/
+EOF
+    
     # Post notice
     discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
         "{\"content\":\"🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`\"}" > /dev/null 2>&1 || true
     
-    # Spawn agent in background (gateway-attached like old workers)
+    # Spawn agent in background
     (
-        cd "$AGENT_DIR"
         export OPENCLAW_MODEL="$MODEL_FLAG"
+        export OPENCLAW_STATE_DIR="$AGENT_DIR"
         
-        # Run agent via Gateway (same as old workers)
+        cd "$AGENT_DIR"
+        
+        # Run agent
         timeout 120 openclaw agent \
             --session-id "${AGENT_ID}" \
-            --message "Complete the task in TASK.txt. Write the result to RESULT.txt." \
+            --message "Complete the task described in AGENTS.md. Write the result to RESULT.txt." \
             --thinking "${THINKING}" \
             > agent.log 2>&1 || true
         
@@ -180,7 +186,7 @@ EOF
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"${MSG}\"}" > /dev/null 2>&1 || true
         else
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" \
-                "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result produced\"}" > /dev/null 2>&1 || true
+                "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result\"}" > /dev/null 2>&1 || true
         fi
         
         # Cleanup
