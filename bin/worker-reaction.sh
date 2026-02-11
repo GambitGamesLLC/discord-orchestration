@@ -500,7 +500,7 @@ post_result() {
     local THINKING="$4"
     local TOKENS_IN="${5:-unknown}"
     local TOKENS_OUT="${6:-unknown}"
-    local COST="${COST:-N/A}"
+    # COST is exported from execute_task, don't shadow it with local declaration
     
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
