@@ -102,12 +102,13 @@ get_task_via_reactions() {
         fi
         
         # Skip messages we've already completed (prevent re-claiming after restart)
+        # Primary check: local file (fast, no API call)
         if [[ -f "$COMPLETED_MESSAGES_FILE" ]] && grep -q "^${MSG_ID}$" "$COMPLETED_MESSAGES_FILE" 2>/dev/null; then
             continue
         fi
         
-        # BUGFIX: Skip messages that already have ANY ✅ reaction (already claimed)
-        # This prevents the infinite loop where we keep picking up our own completed tasks
+        # Secondary check: Discord reactions (source of truth, catches race conditions)
+        # This prevents duplicate processing when local file wasn't synced properly
         local EXISTING_REACTIONS
         EXISTING_REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
         
@@ -115,7 +116,12 @@ get_task_via_reactions() {
         REACTION_COUNT=$(echo "$EXISTING_REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); print(len(data) if isinstance(data, list) else 0)" 2>/dev/null)
         
         if [[ "${REACTION_COUNT:-0}" -gt 0 ]]; then
-            # Check if we're the one who reacted (we already processed this)
+            # Someone already claimed this - check if it's us
+            # Get our user ID if not cached (needed for comparison)
+            if [[ -z "$MY_USER_ID" ]]; then
+                MY_USER_ID=$(discord_api GET "/users/@me" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+            fi
+            
             local HAS_MY_REACTION
             HAS_MY_REACTION=$(echo "$EXISTING_REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); ids=[u.get('id','') for u in data]; print('yes' if '${MY_USER_ID}' in ids else 'no')" 2>/dev/null)
             
@@ -123,6 +129,7 @@ get_task_via_reactions() {
                 # We already have a reaction on this message - we must have processed it before
                 echo "[$(date '+%H:%M:%S')] Skipping message ${MSG_ID:0:12}... (already has our reaction - completed)" >&2
                 echo "$MSG_ID" >> "$COMPLETED_MESSAGES_FILE"
+                sync "$COMPLETED_MESSAGES_FILE" 2>/dev/null || true
                 continue
             else
                 # Someone else claimed it
@@ -583,6 +590,13 @@ post_status() {
 
 # Main
 echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} starting (gateway-attached, full filesystem access)..."
+
+# Prefetch our user ID so it's cached for reaction checks
+if [[ -z "$MY_USER_ID" && -n "$BOT_TOKEN" ]]; then
+    MY_USER_ID=$(discord_api GET "/users/@me" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+    [[ -n "$MY_USER_ID" ]] && echo "[$(date '+%H:%M:%S')] Cached user ID: ${MY_USER_ID:0:12}..."
+fi
+
 post_status "READY" "Online and waiting (non-sandboxed)" || true
 
 IDLE_TIME=0
