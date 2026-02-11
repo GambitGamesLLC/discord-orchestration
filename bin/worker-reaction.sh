@@ -18,6 +18,16 @@ TASK_QUEUE_CHANNEL="${TASK_QUEUE_CHANNEL:-}"
 RESULTS_CHANNEL="${RESULTS_CHANNEL:-}"
 WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
+# Add randomized poll interval per worker
+# This desynchronizes workers to reduce race conditions
+randomize_poll_interval() {
+    # Random interval between 3-8 seconds (was fixed 5s)
+    export POLL_INTERVAL=$(( 3 + RANDOM % 6 ))
+    echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} using poll interval: ${POLL_INTERVAL}s"
+}
+
+# Call at startup
+randomize_poll_interval
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-300}"
 MY_USER_ID=""  # Cached bot user ID for first-reactor-wins logic
 
