@@ -313,6 +313,31 @@ Discord Orchestration requires OpenClaw with multiple model configurations. Here
 
 **⚠️ Note:** These models are examples from early 2026. You should swap them out for the best models available in your time period. Check https://openrouter.ai/models for current pricing and capabilities.
 
+**🔒 Security Note:** Workers run with **full filesystem access** (no `--local` flag). This allows them to:
+- Read/write files anywhere on the system
+- Execute shell commands
+- Access environment variables
+
+**For our use case:** We want workers to have full access to get real work done efficiently.
+
+**For your use case:** If you need sandboxed/restricted workers, modify `bin/worker-reaction.sh` to add the `--local` flag to the `openclaw agent` command:
+
+```bash
+# Change this (full access):
+local AGENT_CMD="openclaw agent --session-id ${WORKER_ID}-${TASK_ID}"
+
+# To this (sandboxed/restricted):
+local AGENT_CMD="openclaw agent --session-id ${WORKER_ID}-${TASK_ID} --local"
+```
+
+**Trade-offs:**
+| Mode | Access | Use Case |
+|------|--------|----------|
+| **No `--local`** (default) | Full filesystem | Real work, file operations, system commands |
+| **`--local`** | Restricted/sandboxed | Untrusted code, security-sensitive environments |
+
+**Recommendation:** Keep the default (full access) for personal/team use where you trust the workers. Use `--local` only if running untrusted sub-agent code.
+
 ```json
 {
   "env": {
