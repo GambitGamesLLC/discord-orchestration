@@ -131,8 +131,8 @@ get_task_via_reactions() {
         
         # If we successfully added reaction, verify we're first (double-check)
         if [[ -z "$CLAIM_RESPONSE" ]]; then
-            # Step 2: First check with short jitter
-            local JITTER=$((100 + RANDOM % 200))  # 100-300ms
+            # Step 2: First check with increased jitter (200-500ms)
+            local JITTER=$((200 + RANDOM % 300))  # 200-500ms (increased from 100-300ms)
             sleep "0.${JITTER}"
             
             # Get our user ID if not cached
@@ -162,9 +162,51 @@ except:
                 continue
             fi
             
-            # Step 5: Double-check verification - wait again and re-verify
-            # This catches eventual consistency issues in Discord's API
-            sleep 0.3
+            # Check if multiple reactors exist (potential race condition)
+            local REACTION_COUNT
+            REACTION_COUNT=$(echo "$REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); print(len(data) if isinstance(data, list) else 0)" 2>/dev/null)
+            
+            # Step 5: If multiple reactors detected, enter exponential backoff loop
+            if [[ "${REACTION_COUNT:-0}" -gt 1 ]]; then
+                echo "[$(date '+%H:%M:%S')] Multiple reactors detected (${REACTION_COUNT}), entering exponential backoff..." >&2
+                
+                # Exponential backoff: 4 attempts with increasing delays
+                # Formula: delay_ms = 100 * (2 ^ attempt) + random(0-100)
+                for attempt in 0 1 2 3; do
+                    local DELAY_MS=$(( 100 * (2 ** attempt) + RANDOM % 100 ))
+                    echo "[$(date '+%H:%M:%S')] Backoff attempt ${attempt}: waiting ${DELAY_MS}ms..." >&2
+                    sleep "0.${DELAY_MS}"
+                    
+                    # Re-check reactions
+                    local BACKOFF_REACTIONS
+                    BACKOFF_REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
+                    
+                    local BACKOFF_FIRST_REACTOR
+                    BACKOFF_FIRST_REACTOR=$(echo "$BACKOFF_REACTIONS" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data and len(data) > 0:
+        print(data[0].get('id', ''))
+except:
+    pass
+" 2>/dev/null)
+                    
+                    # Check if we're still first
+                    if [[ -n "$BACKOFF_FIRST_REACTOR" && -n "$MY_USER_ID" && "$BACKOFF_FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                        echo "[$(date '+%H:%M:%S')] Lost race after backoff attempt ${attempt} for ${MSG_ID:0:12}... (first: ${BACKOFF_FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                        echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
+                        continue 2  # Continue to next message
+                    fi
+                    
+                    # If we're still first, continue to next backoff attempt
+                done
+                
+                echo "[$(date '+%H:%M:%S')] Passed all backoff checks successfully!" >&2
+            fi
+            
+            # Step 6: Final verification with increased delay (500ms instead of 300ms)
+            sleep 0.5  # Increased from 0.3
             
             local REACTIONS2
             REACTIONS2=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
@@ -180,14 +222,14 @@ except:
     pass
 " 2>/dev/null)
             
-            # Step 6: Second verification - if not first, we lost
+            # Step 7: Second verification - if not first, we lost
             if [[ -n "$FIRST_REACTOR2" && -n "$MY_USER_ID" && "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
                 echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR2:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
                 echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
                 continue
             fi
             
-            # Step 6: We won! Get message content and return task
+            # Step 8: We won! Get message content and return task
             local MSG_DATA
             MSG_DATA=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}")
             
