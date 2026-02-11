@@ -677,8 +677,8 @@ kill <worker-pid>
 **Symptoms:** Tasks are expensive
 
 **Tips:**
-- Use `cheap` model for simple tasks (it's FREE)
-- Use `low` thinking for straightforward tasks
+- Use `cheap` model for simple tasks (try to use a FREE model!)
+- Use `primary` thinking for straightforward tasks
 - Use `coder` model for code (cheaper than primary)
 - Save `research` for complex tasks requiring deep reasoning
 
