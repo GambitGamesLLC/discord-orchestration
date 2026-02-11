@@ -14,10 +14,8 @@ openclaw.json
 *.log
 logs/
 
-# Temp files
-/tmp/
-/tmp-discord-tasks/
-/tmp-discord-workers/
+# Runtime state files (worker caches, logs - ephemeral)
+.runtime/
 
 # IDE
 .vscode/

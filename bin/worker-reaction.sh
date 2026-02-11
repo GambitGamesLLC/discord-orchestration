@@ -20,9 +20,13 @@ WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-300}"
 MY_USER_ID=""  # Cached bot user ID for first-reactor-wins logic
-# Cache files for race losses and completed tasks (in /tmp for temp storage)
-LOST_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-lost-messages.txt"
-COMPLETED_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-completed-messages.txt"
+
+# Cache files for race losses and completed tasks (inside repo, gitignored)
+# This ensures persistence across worker restarts but not system reboots
+RUNTIME_DIR="${PROJECT_DIR}/.runtime"
+LOST_MESSAGES_FILE="${RUNTIME_DIR}/${WORKER_ID}-lost-messages.txt"
+COMPLETED_MESSAGES_FILE="${RUNTIME_DIR}/${WORKER_ID}-completed-messages.txt"
+mkdir -p "$RUNTIME_DIR" 2>/dev/null || true
 
 # Discord API helper
 discord_api() {
@@ -69,8 +73,14 @@ get_task_via_reactions() {
     
     [[ -z "$MSG_IDS" ]] && return 0
     
-    # Ensure lost messages cache directory exists
+    # Get our user ID for reaction checking
+    if [[ -z "$MY_USER_ID" ]]; then
+        MY_USER_ID=$(discord_api GET "/users/@me" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+    fi
+    
+    # Ensure cache directories exist
     mkdir -p "$(dirname "$LOST_MESSAGES_FILE")" 2>/dev/null || true
+    mkdir -p "$(dirname "$COMPLETED_MESSAGES_FILE")" 2>/dev/null || true
     
     # Check each message
     while IFS= read -r MSG_ID; do
@@ -86,7 +96,33 @@ get_task_via_reactions() {
             continue
         fi
         
-        # First-reactor-wins: Always try to add reaction, then verify
+        # BUGFIX: Skip messages that already have ANY ✅ reaction (already claimed)
+        # This prevents the infinite loop where we keep picking up our own completed tasks
+        local EXISTING_REACTIONS
+        EXISTING_REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
+        
+        local REACTION_COUNT
+        REACTION_COUNT=$(echo "$EXISTING_REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); print(len(data) if isinstance(data, list) else 0)" 2>/dev/null)
+        
+        if [[ "${REACTION_COUNT:-0}" -gt 0 ]]; then
+            # Check if we're the one who reacted (we already processed this)
+            local HAS_MY_REACTION
+            HAS_MY_REACTION=$(echo "$EXISTING_REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); ids=[u.get('id','') for u in data]; print('yes' if '${MY_USER_ID}' in ids else 'no')" 2>/dev/null)
+            
+            if [[ "$HAS_MY_REACTION" == "yes" ]]; then
+                # We already have a reaction on this message - we must have processed it before
+                echo "[$(date '+%H:%M:%S')] Skipping message ${MSG_ID:0:12}... (already has our reaction - completed)" >&2
+                echo "$MSG_ID" >> "$COMPLETED_MESSAGES_FILE"
+                continue
+            else
+                # Someone else claimed it
+                echo "[$(date '+%H:%M:%S')] Skipping message ${MSG_ID:0:12}... (already claimed by another)" >&2
+                echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
+                continue
+            fi
+        fi
+        
+        # First-reactor-wins: Try to add reaction, then verify
         # Step 1: Add our ✅ reaction (attempt claim)
         local CLAIM_RESPONSE
         CLAIM_RESPONSE=$(curl -s -X PUT \
@@ -190,9 +226,9 @@ except:
 
 # Fallback to file-based - outputs ONLY the task or nothing
 get_task_from_file() {
-    local QUEUE_FILE="/tmp/discord-tasks/queue.txt"
-    local CLAIMED_FILE="/tmp/discord-tasks/claimed.txt"
-    local LOCK_FILE="/tmp/discord-tasks/queue.lock"
+    local QUEUE_FILE="${RUNTIME_DIR}/queue.txt"
+    local CLAIMED_FILE="${RUNTIME_DIR}/claimed.txt"
+    local LOCK_FILE="${RUNTIME_DIR}/queue.lock"
     
     mkdir -p "$(dirname "$QUEUE_FILE")" 2>/dev/null || return 0
     [[ ! -f "$QUEUE_FILE" ]] && return 0
@@ -233,10 +269,8 @@ execute_task() {
     # Check if agent config specified
     AGENT_CONFIG="${AGENT_CONFIG:-}"
     
-    # Local agent always uses default model from config
-    # Get actual default model
-    DEFAULT_MODEL=$(cat ~/.openclaw/openclaw.json 2>/dev/null | grep '"primary"' | cut -d'"' -f4 || echo "unknown")
-    MODEL="${DEFAULT_MODEL:-openrouter/moonshotai/kimi-k2.5}"
+    # Default model (defined in AGENTS.md, kept here for reference)
+    MODEL="openrouter/moonshotai/kimi-k2.5"
     
     if [[ "$REQUESTED_MODEL" != "$MODEL" ]]; then
         echo "[$(date '+%H:%M:%S')] ℹ️ Requested '$REQUESTED_MODEL' but local agent uses default: $MODEL"
@@ -268,7 +302,17 @@ execute_task() {
     
     cat > "${OPENCLAW_WORKSPACE}/AGENTS.md" << EOF
 # Worker ${WORKER_ID}
-Task: ${TASK_DESC}
+
+## Task
+${TASK_DESC}
+
+## Model Defaults
+- Primary: openrouter/moonshotai/kimi-k2.5
+- Cheap: openrouter/stepfun/step-3.5-flash:free
+- Coder: openrouter/qwen/qwen3-coder-next
+- Research: openrouter/google/gemini-3-pro-preview
+
+## Output
 Write result to RESULT.txt
 EOF
 
@@ -361,7 +405,8 @@ post_result() {
     [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
     
     # Local log with full details
-    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> /tmp/discord-tasks/results.txt
+    mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
     
     # Build debug info with task details
     local WORKSPACE_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
@@ -398,7 +443,8 @@ post_status() {
     local STATUS="$1"
     local MSG="$2"
     echo "[STATUS] ${WORKER_ID}: ${STATUS}"
-    echo "$(date +%s)|${WORKER_ID}|${STATUS}|${MSG}" >> /tmp/discord-tasks/status.txt
+    mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
+    echo "$(date +%s)|${WORKER_ID}|${STATUS}|${MSG}" >> "${RUNTIME_DIR}/status.txt"
     post_to_discord "$WORKER_POOL_CHANNEL" "**[${STATUS}]** ${WORKER_ID}: ${MSG}"
 }
 
@@ -443,7 +489,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         
         # Cache this task as completed to prevent re-claiming after restart
         # Extract Discord message ID from task (format: discord-<MSG_ID>|<desc>|...)
-        local COMPLETED_MSG_ID=$(echo "$TASK" | cut -d'|' -f1 | sed 's/^discord-//')
+        COMPLETED_MSG_ID=$(echo "$TASK" | cut -d'|' -f1 | sed 's/^discord-//')
         if [[ -n "$COMPLETED_MSG_ID" ]]; then
             mkdir -p "$(dirname "$COMPLETED_MESSAGES_FILE")" 2>/dev/null || true
             echo "$COMPLETED_MSG_ID" >> "$COMPLETED_MESSAGES_FILE"
