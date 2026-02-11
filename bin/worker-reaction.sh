@@ -541,8 +541,8 @@ post_result() {
     
     # List modified files in workspace
     if [[ -d "$WORKSPACE_DIR" ]]; then
-        local FILES=$(ls -1 "$WORKSPACE_DIR" 2>/dev/null | head -10 | tr '\n' ', ' | sed 's/,/, /g')
-        [[ -n "$FILES" ]] && DEBUG_INFO="\n**Files:** ${FILES%, }"
+        local FILES=$(ls -1 "$WORKSPACE_DIR" 2>/dev/null | head -10 | paste -sd ', ' -)
+        [[ -n "$FILES" ]] && DEBUG_INFO="\n**Files:** ${FILES}"
     fi
     
     # Discord message with enhanced info and full details
