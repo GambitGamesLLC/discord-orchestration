@@ -13,6 +13,7 @@ POLL_INTERVAL="${POLL_INTERVAL:-5}"
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-300}"
 MY_USER_ID=""  # Cached bot user ID for first-reactor-wins logic
 LOST_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-lost-messages.txt"  # Cache messages we've lost on
+COMPLETED_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-completed-messages.txt"  # Cache messages we've completed
 
 # Discord API helper
 discord_api() {
@@ -68,6 +69,11 @@ get_task_via_reactions() {
         
         # Skip messages we've already lost on
         if [[ -f "$LOST_MESSAGES_FILE" ]] && grep -q "^${MSG_ID}$" "$LOST_MESSAGES_FILE" 2>/dev/null; then
+            continue
+        fi
+        
+        # Skip messages we've already completed (prevent re-claiming after restart)
+        if [[ -f "$COMPLETED_MESSAGES_FILE" ]] && grep -q "^${MSG_ID}$" "$COMPLETED_MESSAGES_FILE" 2>/dev/null; then
             continue
         fi
         
@@ -267,13 +273,46 @@ EOF
     cd "$TASK_DIR"
     
     # Gateway-attached agent (no --local flag) - full filesystem access
-    # Build agent command with optional agent config for model selection
+    # Build agent command with model override support
     local AGENT_CMD="openclaw agent --session-id ${WORKER_ID}-${TASK_ID}"
     
-    # Add agent config if specified (for cheap/smart/coding/research workers)
+    # Map model aliases to full model names for OpenClaw
+    local MODEL_FLAG=""
+    case "$REQUESTED_MODEL" in
+        "cheap"|"step-3.5-flash:free")
+            MODEL_FLAG="openrouter/stepfun/step-3.5-flash:free"
+            ;;
+        "coder"|"qwen3-coder-next")
+            MODEL_FLAG="openrouter/qwen/qwen3-coder-next"
+            ;;
+        "research"|"gemini-3-pro-preview")
+            MODEL_FLAG="openrouter/google/gemini-3-pro-preview"
+            ;;
+        "primary"|"kimi-k2.5")
+            MODEL_FLAG="openrouter/moonshotai/kimi-k2.5"
+            ;;
+        openrouter/*)
+            # Full model path provided
+            MODEL_FLAG="$REQUESTED_MODEL"
+            ;;
+        *)
+            # Default to primary if unrecognized
+            MODEL_FLAG="$MODEL"
+            ;;
+    esac
+    
+    # For OpenClaw gateway mode, model is set via OPENCLAW_MODEL env var
+    # (openclaw agent doesn't have a --model flag, it uses env or config)
+    if [[ -n "$MODEL_FLAG" && "$MODEL_FLAG" != "$MODEL" ]]; then
+        export OPENCLAW_MODEL="$MODEL_FLAG"
+        MODEL="$MODEL_FLAG"
+        echo "[$(date '+%H:%M:%S')] Using requested model: $MODEL_FLAG"
+    fi
+    
+    # Add agent config if specified (optional, for complex agent setups)
     if [[ -n "$AGENT_CONFIG" ]]; then
         AGENT_CMD="${AGENT_CMD} --agent ${AGENT_CONFIG}"
-        echo "[$(date '+%H:%M:%S')] Using agent: ${AGENT_CONFIG}"
+        echo "[$(date '+%H:%M:%S')] Using agent config: ${AGENT_CONFIG}"
     fi
     
     AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING}"
@@ -391,6 +430,15 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
             post_result "SUCCESS" "$TASK" "$MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
         else
             post_result "FAILED" "$TASK" "$MODEL" "$TASK_THINKING" "N/A" "N/A"
+        fi
+        
+        # Cache this task as completed to prevent re-claiming after restart
+        # Extract Discord message ID from task (format: discord-<MSG_ID>|<desc>|...)
+        local COMPLETED_MSG_ID=$(echo "$TASK" | cut -d'|' -f1 | sed 's/^discord-//')
+        if [[ -n "$COMPLETED_MSG_ID" ]]; then
+            mkdir -p "$(dirname "$COMPLETED_MESSAGES_FILE")" 2>/dev/null || true
+            echo "$COMPLETED_MSG_ID" >> "$COMPLETED_MESSAGES_FILE"
+            echo "[$(date '+%H:%M:%S')] Cached completed task: ${COMPLETED_MSG_ID:0:12}..."
         fi
         
         post_status "RESTARTING" "Task complete"
