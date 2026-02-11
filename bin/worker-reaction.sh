@@ -506,7 +506,10 @@ post_result() {
     
     # Discord message with enhanced info and full details
     # Use 3 backticks for proper Discord code block rendering
-    local MSG="**[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
+    # Add visual separator at start to separate from previous messages
+    local MSG="═══════════════════════════════════════
+
+**[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
 **Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out
 
 **Task Prompt:**
