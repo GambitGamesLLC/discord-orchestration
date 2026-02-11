@@ -1,8 +1,16 @@
 #!/bin/bash
 #
-# worker-reaction-fixed.sh - Fixed reaction-based task claiming
+# worker-reaction.sh - Discord-based task claiming worker
 
 set -euo pipefail
+
+# Get script directory for relative paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Auto-create workers output directory if it doesn't exist
+WORKERS_DIR="${PROJECT_DIR}/workers"
+mkdir -p "$WORKERS_DIR"
 
 WORKER_ID="${WORKER_ID:-worker-unknown}"
 BOT_TOKEN="${BOT_TOKEN:-}"
@@ -241,9 +249,9 @@ execute_task() {
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
     [[ -n "$AGENT_CONFIG" ]] && echo "[$(date '+%H:%M:%S')] Using agent config: $AGENT_CONFIG"
     
-    # Configurable workspace - defaults to outside .openclaw/ for safety
+    # Configurable workspace - defaults to workers/ subdir in project
     # Workers use isolated directory to prevent config corruption
-    local WORKSPACE="${WORKER_WORKSPACE:-$HOME/Documents/discord-workers}"
+    local WORKSPACE="${WORKER_WORKSPACE:-$WORKERS_DIR}"
     local TASK_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
     # OpenClaw still needs its config from default location
     local OPENCLAW_WORKSPACE="$HOME/.openclaw/workspace"
@@ -344,8 +352,8 @@ post_result() {
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
     
-    # Use isolated worker workspace (outside .openclaw/)
-    local WORKSPACE="${WORKER_WORKSPACE:-$HOME/Documents/discord-workers}"
+    # Use project workers directory (auto-created at startup)
+    local WORKSPACE="${WORKER_WORKSPACE:-$WORKERS_DIR}"
     local RESULT_FILE="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}/RESULT.txt"
     # Fallback to openclaw workspace if needed
     [[ ! -f "$RESULT_FILE" ]] && RESULT_FILE="$HOME/.openclaw/workspace/RESULT.txt"

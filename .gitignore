@@ -37,3 +37,6 @@ tests/tmp/
 # Worker output directories (task artifacts, not source code)
 worker-*/
 worker-worker-*/
+
+# Worker runtime output directory (auto-created on first run)
+workers/
