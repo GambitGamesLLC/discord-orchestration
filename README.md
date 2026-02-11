@@ -1,24 +1,47 @@
 # Discord Orchestration
 
-Distributed multi-agent orchestration using Discord as the message bus. Bypass OpenClaw's buggy `sessions_spawn` by using external worker processes that communicate via Discord channels.
+Distributed multi-agent orchestration using Discord as the message bus. This system allows you to run multiple AI agent workers across different machines, coordinated through Discord channels. It bypasses OpenClaw's buggy `sessions_spawn` by using external worker processes that communicate via Discord.
 
-## Overview
+## Table of Contents
 
-This system allows you to run multiple AI agent workers across different machines, coordinated through Discord. Each worker:
-- Polls for tasks from a Discord channel
-- Claims tasks atomically via emoji reactions (no race conditions)
-- Executes tasks in isolated OpenClaw sessions
-- Posts results back to Discord
-- Restarts after each task for clean context
+- [What This System Does](#what-this-system-does)
+- [System Architecture](#system-architecture)
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Quick Start Guide](#quick-start-guide)
+- [Detailed Setup](#detailed-setup)
+- [Using the System](#using-the-system)
+- [Model Types and Pricing](#model-types-and-pricing)
+- [Understanding Results](#understanding-results)
+- [Managing Workers](#managing-workers)
+- [Troubleshooting](#troubleshooting)
+- [Scripts Reference](#scripts-reference)
+- [Advanced Configuration](#advanced-configuration)
+- [Architecture Details](#architecture-details)
+- [FAQ](#faq)
+
+---
+
+## What This System Does
+
+This system lets you:
+- **Submit tasks** to a Discord channel
+- **Have multiple workers** (on different machines) pick up and complete tasks
+- **Track costs** for each task (tokens used × model pricing)
+- **Get results** posted back to Discord automatically
+- **Run workers anywhere** - your laptop, a cloud VPS, a friend's computer
 
 **Key Benefits:**
 - ✅ No OpenClaw session lock bugs
-- ✅ Clean context per task (process restart)
+- ✅ Clean context per task (workers restart after each task)
 - ✅ Cross-machine support (anyone with Discord can run workers)
-- ✅ Visible audit trail (all coordination in Discord)
-- ✅ Atomic task claiming (reaction-based)
+- ✅ Visible audit trail (all coordination happens in Discord)
+- ✅ Atomic task claiming (no race conditions via Discord reactions)
+- ✅ Automatic cost tracking (see exact cost per task)
 
-## Architecture
+---
+
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -31,7 +54,7 @@ This system allows you to run multiple AI agent workers across different machine
 │  │     Tasks posted here (with ✅ when claimed)    │   │
 │  │                                                  │   │
 │  │  📊 #results                                    │   │
-│  │     Completed work posted here                  │   │
+│  │     Completed work with tokens & cost           │   │
 │  │                                                  │   │
 │  │  🔄 #worker-pool                                │   │
 │  │     Worker status (READY, CLAIMED, RESTARTING)  │   │
@@ -47,300 +70,631 @@ This system allows you to run multiple AI agent workers across different machine
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Workers Read From
+- **#task-queue**: Poll for new tasks (check every 3-8 seconds)
+- **Their own state**: `workers/worker-N/` directory for task files
+
+### Workers Write To
+- **#task-queue**: Add ✅ reaction when claiming a task
+- **#results**: Post completed task results with tokens and cost
+- **#worker-pool**: Post status updates (READY, CLAIMED, RESTARTING)
+- **Local workspace**: `workers/worker-N/tasks/TASK-ID/` for files
+
+---
+
 ## How It Works
 
 ### Task Lifecycle
 
-1. **Task Submission**
-   - You (or an orchestrator) posts a task to `#task-queue`
-   - Format: `"Write a Python function to sort a list [model:gpt-4o] [thinking:medium]"`
+```
+1. SUBMIT TASK
+   You post: "Calculate 25 × 4 [model:cheap] [thinking:low]"
+   → Goes to #task-queue
 
-2. **Task Claiming** (Atomic)
-   - Workers poll `#task-queue` every few seconds
-   - Worker finds a message without ✅ reaction
-   - Worker attempts to add ✅ reaction
-   - **If successful:** Worker claims the task (atomic operation)
-   - **If failed:** Another worker got it first, skip and retry
+2. WORKER CLAIMS TASK (Atomic)
+   Worker-2 polls #task-queue
+   Worker-2 sees message without ✅ reaction
+   Worker-2 tries to add ✅ reaction
+   SUCCESS → Worker-2 claims the task
+   FAILURE → Another worker got it first, try next task
 
-3. **Task Execution**
-   - Worker parses task description, model, thinking level
-   - Worker executes task in fresh OpenClaw session
-   - Worker writes result to local workspace
+3. WORKER EXECUTES TASK
+   Worker-2 reads task from Discord
+   Worker-2 spawns OpenClaw agent with:
+     - Task description
+     - Model (cheap = step-3.5-flash:free)
+     - Thinking level (low)
+   Agent writes result to RESULT.txt
 
-4. **Result Reporting**
-   - Worker posts result to `#results` channel
-   - Worker posts status update to `#worker-pool`
-   - Worker exits (clean context)
+4. WORKER REPORTS RESULT
+   Worker-2 extracts:
+     - Tokens used (from session file)
+     - Cost (calculated from pricing config)
+   Worker-2 posts to #results:
+     ═══════════════════════════════════════
+     [SUCCESS] discord-xxx by worker-2
+     Model: openrouter/stepfun/step-3.5-flash:free | Thinking: low | Tokens: 172 in / 48 out | Cost: $0.00
+     Task: Calculate 25 × 4
+     Result: 100
+   Worker-2 posts RESTARTING to #worker-pool
+   Worker-2 exits
 
-5. **Worker Restart**
-   - Worker manager detects exit, restarts worker
-   - Fresh process, clean OpenClaw context
-   - Worker posts "READY" to `#worker-pool`
+5. WORKER RESTARTS
+   Manager detects worker exit
+   Manager restarts worker-2
+   Fresh OpenClaw context
+   Worker posts READY to #worker-pool
+   Loop back to step 2
+```
 
-## Quick Start
+### Race Condition Prevention
 
-### 1. Create Discord Server
+Multiple workers polling at the same time could claim the same task. We prevent this with:
 
-1. Open Discord → Click "+" → "Create My Own"
-2. Name it (e.g., "OpenButter Workers")
-3. Create channels:
-   - `#task-queue` - Tasks waiting to be claimed
-   - `#results` - Completed work
-   - `#worker-pool` - Worker status updates
+1. **Discord Reaction Atomicity**: Only one worker can add the first ✅ reaction
+2. **Exponential Backoff**: If multiple workers detect each other, they back off with increasing delays
+3. **Randomized Polling**: Each worker polls every 3-8 seconds (randomized), so they don't synchronize
 
-### 2. Create Discord Bots
+---
 
-For each worker (plus one orchestrator bot):
+## Prerequisites
 
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Click "New Application" → Name it (e.g., "Worker-1")
-3. Go to "Bot" tab:
-   - Click "Reset Token" and copy it
-   - Enable "Public Bot" (ON)
-   - Disable "Requires OAuth2 Code Grant" (OFF)
-   - Enable "Message Content Intent" (ON)
-4. Go to "OAuth2" → "URL Generator":
-   - Select `bot` scope
-   - Permissions: `Send Messages`, `Read Message History`, `Add Reactions`
-   - Copy the generated URL
-   - Open URL in browser and invite to your server
+Before you start, you need:
 
-Repeat for each worker (Worker-1, Worker-2, Worker-3, etc.) and an orchestrator bot.
+1. **A Discord account** (free)
+2. **A Discord server** where you can create channels
+3. **OpenClaw installed** on machines running workers
+4. **Discord bot tokens** (we'll create these in setup)
 
-### 3. Configure Workers
+---
+
+## Quick Start Guide
+
+### Step 1: Create Discord Server
+
+1. Open Discord
+2. Click the **+** button (left sidebar)
+3. Select **"Create My Own"**
+4. Name your server (e.g., "AI Workers")
+5. Click **Create**
+
+### Step 2: Create Discord Channels
+
+In your new server, create three channels:
+
+1. **#task-queue** (type: Text Channel)
+   - Where you post tasks
+2. **#results** (type: Text Channel)
+   - Where workers post completed tasks
+3. **#worker-pool** (type: Text Channel)
+   - Where workers post status updates
+
+### Step 3: Create Discord Bots
+
+Each worker needs its own bot. You'll also want one for submitting tasks.
+
+**For each bot (repeat this for Worker-1, Worker-2, etc.):**
+
+1. Go to https://discord.com/developers/applications
+2. Click **"New Application"**
+3. Name it (e.g., "Worker-1")
+4. Go to **"Bot"** tab (left sidebar)
+5. Click **"Reset Token"** and copy the token (save it!)
+6. Enable these settings:
+   - **Public Bot**: ON
+   - **Requires OAuth2 Code Grant**: OFF
+   - **Message Content Intent**: ON (important!)
+7. Go to **"OAuth2"** → **"URL Generator"**
+8. Select scopes:
+   - Check **bot**
+9. Select bot permissions:
+   - **Send Messages**
+   - **Read Message History**
+   - **Add Reactions**
+10. Copy the generated URL at the bottom
+11. Open that URL in a new browser tab
+12. Select your server and click **Authorize**
+
+**Repeat** for each worker you want to create.
+
+### Step 4: Get Channel and Server IDs
+
+You need the numeric IDs for your channels:
+
+1. In Discord, go to **User Settings** (gear icon)
+2. Go to **Advanced**
+3. Enable **Developer Mode**: ON
+4. Close settings
+5. Right-click on `#task-queue` → **Copy Channel ID**
+6. Save this ID
+7. Repeat for `#results` and `#worker-pool`
+8. Right-click your **server name** → **Copy Server ID**
+9. Save this ID
+
+### Step 5: Configure Workers
 
 ```bash
-cd discord-orchestration
+cd ~/Documents/GitHub/discord-orchestration
 
-# Run setup script
+# Run the setup script
 ./bin/setup-discord.sh
 
-# Enter bot tokens and channel IDs when prompted
+# It will ask for:
+# - Bot tokens (from Step 3)
+# - Channel IDs (from Step 4)
+# - Server ID (from Step 4)
 ```
 
-This creates `discord-config.env` with your configuration.
+This creates `discord-config.env` with all your settings.
 
-### 4. Start Workers
-
-On each machine that will run workers:
+### Step 6: Start Workers
 
 ```bash
-# Terminal 1: Start worker manager with 3 workers
+# Start the worker manager with 3 workers
 ./bin/worker-manager-discord-curl.sh --workers 3
 
-# Workers will:
-# - Post "READY" to #worker-pool
-# - Poll #task-queue for tasks
-# - Claim tasks via ✅ reaction
-# - Execute and post results
-# - Restart after each task
+# You'll see output like:
+# [MANAGER] Starting worker-1...
+# [MANAGER] Starting worker-2...
+# [MANAGER] Starting worker-3...
+# [worker-1] [READY] Online and waiting
 ```
 
-### 5. Submit Tasks
+Check your Discord **#worker-pool** channel - you should see READY messages!
 
-From any machine (or via orchestrator):
+### Step 7: Submit a Test Task
+
+In a new terminal:
 
 ```bash
-# Submit task to Discord queue
-./bin/submit-to-queue.sh "Write a hello world program in Python"
-
-# Or with specific model/thinking:
-./bin/submit-to-queue.sh "Review this code" "claude-sonnet-4" "high"
-
-# Or inline tags:
-./bin/submit-to-queue.sh "Optimize this function [model:gpt-4o] [thinking:high]"
+./bin/submit-to-queue.sh "Calculate 5 × 5" "cheap" "low"
 ```
 
-Watch `#worker-pool` for worker status and `#results` for completed work.
+Watch **#results** in Discord - you should see the completed task with tokens and cost!
 
-## Scripts Reference
+---
 
-### Primary Scripts (`bin/`)
+## Detailed Setup
 
-| Script | Purpose |
-|--------|---------|
-| `worker-reaction.sh` | Main worker - polls Discord, claims via reactions, executes tasks |
-| `worker-manager-discord-curl.sh` | Manages N workers, auto-restarts them |
-| `submit-to-queue.sh` | Submit tasks to Discord #task-queue |
-| `submit-to-discord.sh` | Alternative submission method |
-| `setup-discord.sh` | Interactive configuration for bot tokens |
-| `clear-task-queue.sh` | Delete all messages from #task-queue |
-| `emergency-stop.sh` | Kill all worker processes |
+### Understanding the Discord Config File
 
-### Test Scripts (`tests/`)
-
-| Script | Purpose |
-|--------|---------|
-| `test-simple.sh` | Single-terminal test (start worker + submit task) |
-| `test-reaction-permissions.sh` | Verify bot can add reactions |
-| `debug-discord.sh` | Debug Discord API connectivity |
-
-## Managing Workers
-
-### Add a New Worker
-
-1. **Create new Discord bot** (see Quick Start step 2)
-   - Name it "Worker-N" (where N is next number)
-   - Copy the bot token
-
-2. **Add token to config**:
-   ```bash
-   # Edit discord-config.env
-   echo 'WORKER4_TOKEN="your-new-token"' >> discord-config.env
-   ```
-
-3. **Start the new worker** on a machine:
-   ```bash
-   WORKER_ID="worker-4" \
-   BOT_TOKEN="your-new-token" \
-   ./bin/worker-reaction.sh
-   ```
-
-   Or use the manager:
-   ```bash
-   # Edit worker-manager to include worker-4
-   # Then restart manager
-   ```
-
-### Remove a Worker
-
-1. **Kill the worker process**:
-   ```bash
-   # Find worker PID
-   pgrep -f "worker-4"
-   
-   # Kill it
-   kill <PID>
-   ```
-
-2. **Or stop the manager** (if using manager):
-   ```bash
-   # Press 'q' in manager terminal
-   # Or Ctrl+C
-   ```
-
-3. **Remove from config** (optional):
-   ```bash
-   # Edit discord-config.env and remove WORKERN_TOKEN line
-   ```
-
-### Emergency Stop (All Workers)
+After running `setup-discord.sh`, you'll have `discord-config.env`:
 
 ```bash
-./bin/emergency-stop.sh
-# Or manually:
-pkill -f "worker-reaction"
-pkill -f "worker-manager"
-```
+# Bot Tokens (KEEP THESE SECRET!)
+# Each worker needs its own bot token
+WORKER1_TOKEN="FAKE_DISCORD_TOKEN_PLACEHOLDER"
+WORKER2_TOKEN="abc123..."
+WORKER3_TOKEN="xyz789..."
 
-## Configuration
-
-### Environment Variables
-
-Create `discord-config.env` (generated by setup script):
-
-```bash
-# Bot Tokens (KEEP SECRET!)
-CHIP_TOKEN="your-orchestrator-bot-token"
-WORKER1_TOKEN="your-worker-1-token"
-WORKER2_TOKEN="your-worker-2-token"
-WORKER3_TOKEN="your-worker-3-token"
-
-# Channel IDs (right-click channel → Copy Channel ID)
+# Channel IDs (from Discord Developer Mode)
+# These are the channels workers will use
 TASK_QUEUE_CHANNEL="1234567890123456789"
 RESULTS_CHANNEL="1234567890123456789"
 WORKER_POOL_CHANNEL="1234567890123456789"
 
-# Server ID (right-click server name → Copy Server ID)
+# Server ID (Guild ID)
 GUILD_ID="1234567890123456789"
 ```
 
-### Worker Settings
+**Security**: Never share or commit `discord-config.env`. It contains your bot tokens.
 
-Edit in scripts or set as environment variables:
+### Adding Workers on Different Machines
+
+You can run workers on multiple machines (your laptop, a cloud server, a friend's computer):
+
+1. **Copy the repository** to the new machine:
+   ```bash
+   git clone <your-repo-url>
+   cd discord-orchestration
+   ```
+
+2. **Copy the config** (securely!):
+   ```bash
+   # From your main machine, securely transfer discord-config.env
+   # Don't use email or public channels!
+   ```
+
+3. **Start workers** on the new machine:
+   ```bash
+   ./bin/worker-manager-discord-curl.sh --workers 2
+   ```
+
+Now you have workers on multiple machines all coordinated through Discord!
+
+---
+
+## Using the System
+
+### Submitting Tasks
 
 ```bash
-export POLL_INTERVAL="5"        # Seconds between polls (default: 5)
-export MAX_IDLE_TIME="300"      # Exit after idle seconds (default: 300)
-export WORKER_ID="worker-1"     # Worker identifier
+# Basic usage
+./bin/submit-to-queue.sh "Your task here"
+
+# With specific model
+./bin/submit-to-queue.sh "Your task" "primary" "low"
+#                                   ^ model  ^ thinking
+
+# With inline tags (any order)
+./bin/submit-to-queue.sh "Review this code [model:coder] [thinking:high]"
+./bin/submit-to-queue.sh "[thinking:medium] Write a poem about cats [model:primary]"
 ```
+
+### Task Format
+
+You can include special tags in your task:
+
+- `[model:MODEL]` - Request a specific model (cheap, primary, coder, research)
+- `[thinking:LEVEL]` - Set thinking level (off, low, medium, high)
+
+**Examples:**
+```
+Write a Python function to sort a list [model:coder] [thinking:medium]
+
+[model:research] [thinking:high] Explain the implications of quantum computing for cryptography
+
+Quick math: 25 × 4 [model:cheap] [thinking:low]
+```
+
+### Monitoring Workers
+
+Watch these Discord channels:
+
+- **#worker-pool**: See worker status (READY, CLAIMED, RESTARTING)
+- **#results**: See completed tasks with tokens and cost
+- **#task-queue**: See pending tasks (ones without ✅ are waiting)
+
+---
+
+## Model Types and Pricing
+
+Workers can use different AI models. Each has different capabilities and costs.
+
+### Available Models
+
+| Alias | Full Model Name | Best For | Input Cost | Output Cost |
+|-------|-----------------|----------|------------|-------------|
+| **cheap** | stepfun/step-3.5-flash:free | Quick tasks, testing | **FREE** ($0.00) | **FREE** ($0.00) |
+| **primary** | moonshotai/kimi-k2.5 | General-purpose work | $0.00045/1K tokens | $0.00225/1K tokens |
+| **coder** | qwen/qwen3-coder-next | Code generation | $0.00015/1K tokens | $0.0008/1K tokens |
+| **research** | google/gemini-3-pro-preview | Deep research, long context | $0.002/1K tokens | $0.012/1K tokens |
+
+### Cost Calculation
+
+**Formula:**
+```
+cost = (input_tokens × input_cost + output_tokens × output_cost) ÷ 1000
+```
+
+**Example with primary model:**
+- Task uses 1000 input tokens and 500 output tokens
+- Input cost: (1000 × $0.00045) ÷ 1000 = $0.00045
+- Output cost: (500 × $0.00225) ÷ 1000 = $0.001125
+- **Total: $0.001575** (about 0.16 cents)
+
+**Pricing Notes:**
+- Costs are read from `~/.openclaw/openclaw.json`
+- The `cheap` model is completely FREE
+- Research model is most expensive but has highest quality
+- Coder model is cheapest paid option and optimized for code
+
+---
+
+## Understanding Results
+
+When a task completes, you'll see this in **#results**:
+
+```
+═══════════════════════════════════════
+
+[SUCCESS] discord-1471241464699945010 by worker-2
+Model: openrouter/moonshotai/kimi-k2.5 | Thinking: low | Tokens: 180 in / 61 out | Cost: $0.000218
+
+Task Prompt:
+```
+Calculate 25 × 4
+```
+
+Result:
+```
+25 × 4 = 100
+```
+
+📁 Workspace: `workers/worker-2/tasks/discord-1471241464699945010`
+```
+
+### Breaking Down the Format
+
+- **═══ Separator**: Visual break between different task results
+- **[SUCCESS]**: Task completed successfully (or [FAILED])
+- **discord-xxx**: Unique task ID
+- **by worker-2**: Which worker completed it
+- **Model**: Which AI model was used
+- **Thinking**: Thinking level (off/low/medium/high)
+- **Tokens**: Input tokens (your prompt) / Output tokens (AI response)
+- **Cost**: Total cost in dollars
+- **Task Prompt**: What you asked for
+- **Result**: The AI's response
+- **📁 Workspace**: Where files are stored locally
+
+### Local Files
+
+Each task creates files in `workers/worker-N/tasks/TASK-ID/`:
+
+```
+workers/worker-2/tasks/discord-1471241464699945010/
+├── AGENTS.md      # Task context for the agent
+├── TASK.txt       # Task description
+├── RESULT.txt     # Final result
+└── agent-output.log  # Debug output
+```
+
+---
+
+## Managing Workers
+
+### Starting Workers
+
+```bash
+# Start 3 workers with manager
+./bin/worker-manager-discord-curl.sh --workers 3
+
+# Start specific number
+./bin/worker-manager-discord-curl.sh --workers 5
+
+# Start a single worker manually
+WORKER_ID="worker-1" BOT_TOKEN="your-token" ./bin/worker-reaction.sh
+```
+
+### Stopping Workers
+
+```bash
+# Stop all workers (emergency)
+./bin/emergency-stop.sh
+
+# Stop manager (press 'q' in the manager terminal)
+
+# Stop individual worker
+kill <worker-pid>
+```
+
+### Adding More Workers
+
+1. Create a new Discord bot (see Step 3 in Quick Start)
+2. Add its token to `discord-config.env`
+3. Start the new worker:
+   ```bash
+   WORKER_ID="worker-4" BOT_TOKEN="new-token" ./bin/worker-reaction.sh
+   ```
+
+### Worker Status Meanings
+
+| Status | Meaning |
+|--------|---------|
+| **READY** | Worker is online, waiting for tasks |
+| **CLAIMED** | Worker has claimed a task and is working on it |
+| **RESTARTING** | Worker finished a task, restarting for clean context |
+| **IDLE** | Worker timed out after 5 minutes with no tasks |
+
+---
 
 ## Troubleshooting
 
-### Workers not picking up tasks
+### Workers Not Picking Up Tasks
 
-1. **Check bot permissions**:
+**Symptoms:** Tasks sit in #task-queue with no ✅ reaction
+
+**Check:**
+1. Are workers showing as READY in #worker-pool?
+2. Can workers read the #task-queue channel?
    ```bash
    ./tests/debug-discord.sh
    ```
+3. Are channel IDs correct in `discord-config.env`?
+4. Do bots have proper permissions?
+   - Send Messages
+   - Read Message History
+   - Add Reactions
 
-2. **Verify channel IDs** in `discord-config.env`
+### Rate Limiting
 
-3. **Check if bot is in server**:
-   - Discord Server Settings → Integrations → Check bot is listed
+**Symptoms:** Workers show 429 errors, slow response
 
-### Rate limiting
+**Fix:**
+- Increase poll interval: `export POLL_INTERVAL=10`
+- Discord limits: 5 requests/second per channel
+- Workers automatically back off when rate limited
 
-Discord API has rate limits:
-- 5 requests per second per channel
-- If you see 429 errors, increase `POLL_INTERVAL`
+### Task Execution Failed
 
-### Task not found errors
+**Symptoms:** Task shows [FAILED] in #results
 
-The "Unknown Message" error is normal - it happens when:
-- Another worker already claimed the task
-- Message was deleted
-- Race condition (harmless, worker will retry)
+**Check:**
+1. Look at `workers/worker-N/tasks/TASK-ID/agent-output.log`
+2. Check if RESULT.txt was created
+3. Verify model name is valid
+4. Check OpenClaw gateway is running: `openclaw gateway status`
 
-### Clean up stuck state
+### Workers Keep Claiming Same Task
+
+**Symptoms:** Multiple workers claim and complete the same task
+
+**Fix:**
+- This shouldn't happen with reaction claiming
+- Check that Discord API is accessible
+- Clear completed tasks from #task-queue periodically
+
+### High Costs
+
+**Symptoms:** Tasks are expensive
+
+**Tips:**
+- Use `cheap` model for simple tasks (it's FREE)
+- Use `low` thinking for straightforward tasks
+- Use `coder` model for code (cheaper than primary)
+- Save `research` for complex tasks requiring deep reasoning
+
+---
+
+## Scripts Reference
+
+### Main Scripts (`bin/`)
+
+| Script | Purpose | Example |
+|--------|---------|---------|
+| `worker-reaction.sh` | Core worker process | Called by manager |
+| `worker-manager-discord-curl.sh` | Manages N workers, auto-restarts | `./bin/worker-manager-discord-curl.sh --workers 3` |
+| `submit-to-queue.sh` | Submit task to Discord | `./bin/submit-to-queue.sh "Task" "cheap" "low"` |
+| `setup-discord.sh` | Interactive setup for tokens | `./bin/setup-discord.sh` |
+| `clear-task-queue.sh` | Delete all tasks from queue | `./bin/clear-task-queue.sh` |
+| `emergency-stop.sh` | Kill all workers immediately | `./bin/emergency-stop.sh` |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POLL_INTERVAL` | 5 | Seconds between Discord polls |
+| `MAX_IDLE_TIME` | 300 | Seconds before worker exits if idle |
+| `WORKER_ID` | worker-unknown | Worker identifier |
+| `BOT_TOKEN` | (from config) | Discord bot token |
+| `OPENCLAW_STATE_DIR` | (auto) | Isolated OpenClaw state directory |
+
+---
+
+## Advanced Configuration
+
+### Customizing Worker Behavior
+
+Edit `bin/worker-reaction.sh` to change:
+
+- **Task timeout**: Change `timeout 120` to desired seconds
+- **Max idle time**: Change `MAX_IDLE_TIME` default
+- **Poll interval**: Change `POLL_INTERVAL` default
+
+### File-Based Fallback
+
+If Discord API is unavailable, workers automatically use file-based queue:
+
+```
+.runtime/queue.txt       # Pending tasks
+.runtime/claimed.txt     # Claimed tasks
+.runtime/results.txt    # Local results log
+```
+
+This ensures tasks complete even if Discord is down.
+
+### Cost Tracking Configuration
+
+Costs are read from `~/.openclaw/openclaw.json`. To update pricing:
 
 ```bash
-# Clear task queue
-./bin/clear-task-queue.sh
+# Edit your OpenClaw config
+openclaw config edit
 
-# Kill all workers
-./bin/emergency-stop.sh
-
-# Remove local state
-rm -rf /tmp/discord-tasks /tmp/discord-workers
+# Or directly edit:
+~/.openclaw/openclaw.json
 ```
+
+Update the `models.providers.openrouter.models[].cost` section.
+
+---
 
 ## Architecture Details
 
-### Why Reactions for Claiming?
+### Why Discord Reactions?
 
-- **Atomic:** Adding a reaction succeeds or fails entirely
-- **No race conditions:** Only one worker can add the first reaction
-- **Visible:** You can see which worker claimed which task
-- **No polling conflicts:** Workers don't fight over the same task
+Discord's reaction API provides **atomic operations**:
+
+1. Worker A checks: "No reactions yet"
+2. Worker B checks: "No reactions yet"
+3. Both try to add ✅ simultaneously
+4. Discord guarantees only ONE succeeds
+5. Winner claims the task, loser tries next task
+
+This is called **first-reactor-wins** and prevents race conditions without complex locking.
 
 ### Why Process Restart?
 
-OpenClaw's `sessions_spawn` has bugs:
-- Session lock timeouts
-- Context pollution between sub-agents
-- Model override ignored
+OpenClaw's built-in `sessions_spawn` has known issues:
+- Session locks can timeout
+- Context gets polluted between tasks
+- Model overrides sometimes ignored
 
-By restarting the entire process after each task:
-- ✅ Clean OpenClaw context every time
+By restarting the entire worker process after each task:
+- ✅ Fresh OpenClaw session every time
 - ✅ No session lock contention
-- ✅ Predictable behavior
+- ✅ Clean, predictable behavior
+- ✅ Memory leaks prevented
 
-### Fallback to File Queue
+### Worker State Isolation
 
-If Discord API fails (network issues, rate limits), workers automatically fall back to file-based queue (`/tmp/discord-tasks/queue.txt`). This ensures reliability even when Discord is unavailable.
+Each worker uses `OPENCLAW_STATE_DIR` to isolate its state:
 
-## Contributing
+```
+workers/worker-1/          # Worker 1's isolated state
+├── AGENTS.md              # Task context (no orchestrator identity)
+├── identity/              # OpenClaw device auth
+└── tasks/                 # Task outputs
+    └── discord-xxx/
+        ├── RESULT.txt
+        └── agent-output.log
+```
 
-This system was built as a workaround for OpenClaw sub-agent bugs. When OpenClaw fixes `sessions_spawn`, this can serve as:
-- A fallback for cross-machine coordination
-- A blueprint for distributed agent systems
-- An example of Discord-as-a-message-bus architecture
+This prevents workers from corrupting each other's state or the main OpenClaw workspace.
+
+---
+
+## FAQ
+
+**Q: Can I run workers on different machines?**
+A: Yes! Workers just need Discord access. Run them on your laptop, desktop, cloud VPS, anywhere.
+
+**Q: What happens if a worker crashes?**
+A: The manager automatically restarts it. If you're not using the manager, manually restart the worker.
+
+**Q: Can I use this with non-OpenClaw agents?**
+A: The workers are designed for OpenClaw, but you could modify `execute_task()` in `worker-reaction.sh` to use other systems.
+
+**Q: How much does this cost?**
+A: The system itself is free. You only pay for AI model usage (OpenRouter API). The `cheap` model is completely free.
+
+**Q: Can workers see my personal OpenClaw files?**
+A: No. Workers use `OPENCLAW_STATE_DIR` for isolation. They can't access your main `~/.openclaw/workspace/` files.
+
+**Q: What if Discord goes down?**
+A: Workers automatically fall back to file-based queue (`runtime/queue.txt`). Tasks will still complete, just without Discord notifications.
+
+**Q: Can I submit tasks programmatically?**
+A: Yes! Just call `./bin/submit-to-queue.sh` from scripts, cron jobs, or other applications.
+
+**Q: How do I update worker code?**
+A: Pull latest changes from git, then restart workers. The manager will restart them with new code.
+
+---
+
+## Credits
+
+Built by **Chip** (OpenClaw agent) with guidance from **Derrick**.
+
+This system was created as a workaround for OpenClaw's buggy `sessions_spawn` system. It serves as:
+- A production-ready distributed agent orchestration system
+- A blueprint for Discord-as-a-message-bus architectures
+- An example of atomic task claiming without locks
 
 ## License
 
 Same as OpenClaw project.
 
-## Credits
+---
 
-Built by Chip (OpenClaw agent) with guidance from Derrick.
+## Getting Help
+
+If something isn't working:
+
+1. Check this README's Troubleshooting section
+2. Look at the test scripts in `tests/`
+3. Check logs in `workers/worker-N/tasks/TASK-ID/agent-output.log`
+4. Review Discord channels for status messages
+
+Remember: Workers restart automatically, so transient failures usually resolve themselves!
