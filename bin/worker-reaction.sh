@@ -430,29 +430,48 @@ EOF
         echo "[$(date '+%H:%M:%S')] Using agent config: ${AGENT_CONFIG}"
     fi
     
-    AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING} --json"
+    AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING}"
     
     # Export tokens so post_result can access them
     export TOKENS_IN="unknown"
     export TOKENS_OUT="unknown"
     
-    # Run agent and capture JSON output
-    local AGENT_OUTPUT
-    AGENT_OUTPUT=$(timeout 120 bash -c "$AGENT_CMD" 2>&1)
-    local AGENT_EXIT_CODE=$?
-    
-    # Save output to log for debugging
-    echo "$AGENT_OUTPUT" > agent-output.log
-    
-    # Extract tokens from JSON output
-    if [[ $AGENT_EXIT_CODE -eq 0 ]]; then
-        TOKENS_IN=$(echo "$AGENT_OUTPUT" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['result']['meta']['agentMeta']['usage']['input'])" 2>/dev/null || echo "unknown")
-        TOKENS_OUT=$(echo "$AGENT_OUTPUT" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['result']['meta']['agentMeta']['usage']['output'])" 2>/dev/null || echo "unknown")
-    fi
-    
-    # Check for RESULT.txt in isolated task dir (preferred)
-    if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
-        return 0
+    # Run agent
+    if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
+        
+        # Extract tokens from session transcript file (more reliable than agent output)
+        # Session file: ~/.openclaw/agents/main/sessions/{worker-id}-{task-id}.jsonl
+        local SESSION_FILE="${HOME}/.openclaw/agents/main/sessions/${WORKER_ID}-${TASK_ID}.jsonl"
+        if [[ -f "$SESSION_FILE" ]]; then
+            # Find the last assistant message with usage data
+            local TOKENS_JSON
+            TOKENS_JSON=$(tail -20 "$SESSION_FILE" | python3 -c "
+import json,sys
+usage = None
+for line in sys.stdin:
+    try:
+        data = json.loads(line)
+        if data.get('type') == 'message' and data.get('message',{}).get('role') == 'assistant':
+            msg = data['message']
+            if 'usage' in msg:
+                usage = msg['usage']
+    except:
+        pass
+if usage:
+    print(json.dumps(usage))
+" 2>/dev/null)
+            
+            if [[ -n "$TOKENS_JSON" ]]; then
+                TOKENS_IN=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('input', 'unknown'))" 2>/dev/null)
+                TOKENS_OUT=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output', 'unknown'))" 2>/dev/null)
+                echo "[$(date '+%H:%M:%S')] Extracted tokens from session: in=${TOKENS_IN}, out=${TOKENS_OUT}"
+            fi
+        fi
+        
+        # Check for RESULT.txt in isolated task dir (preferred)
+        if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
+            return 0
+        fi
     fi
     return 1
 }
