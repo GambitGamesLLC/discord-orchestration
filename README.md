@@ -10,6 +10,7 @@ Distributed multi-agent orchestration using Discord as the message bus. This sys
 - [Prerequisites](#prerequisites)
 - [Quick Start Guide](#quick-start-guide)
 - [Detailed Setup](#detailed-setup)
+- [OpenClaw Configuration](#openclaw-configuration)
 - [Using the System](#using-the-system)
 - [Model Types and Pricing](#model-types-and-pricing)
 - [Understanding Results](#understanding-results)
@@ -48,7 +49,7 @@ This system lets you:
 │                    Your Machine                         │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │           Discord Server (e.g.,                 │    │
-│  │        "OpenButter Workers")                    │    │
+│  │        "OpenClaw Workers")                      │    │
 │  │                                                 │    │
 │  │  📋 #task-queue                                 │    │
 │  │     Tasks posted here (with ✅ when claimed)    │    │
@@ -301,6 +302,118 @@ You can run workers on multiple machines (your laptop, a cloud server, a friend'
    ```
 
 Now you have workers on multiple machines all coordinated through Discord!
+
+---
+
+## OpenClaw Configuration
+
+Discord Orchestration requires OpenClaw with multiple model configurations. Here's how to set up your `~/.openclaw/openclaw.json` for multiple OpenRouter models with nicknames and pricing.
+
+### Example Configuration
+
+```json
+{
+  "env": {
+    "OPENROUTER_API_KEY": "<YOUR-OPENROUTER-KEY-HERE>"
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "moonshotai/kimi-k2.5",
+            "name": "Kimi K2.5",
+            "contextWindow": 262001,
+            "maxTokens": 262001,
+            "reasoning": true,
+            "cost": {
+              "input": 0.00045,
+              "output": 0.00225,
+              "cacheRead": 0.00007,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "qwen/qwen3-coder-next",
+            "name": "Qwen 3 Coder",
+            "contextWindow": 262001,
+            "maxTokens": 262001,
+            "reasoning": true,
+            "cost": {
+              "input": 0.00015,
+              "output": 0.0008,
+              "cacheRead": 0.00,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "stepfun/step-3.5-flash:free",
+            "name": "Step 3.5 Flash (Free)",
+            "contextWindow": 256000,
+            "maxTokens": 256000,
+            "cost": {
+              "input": 0.00,
+              "output": 0.00,
+              "cacheRead": 0.00,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "google/gemini-3-pro-preview",
+            "name": "Gemini 3 Pro",
+            "contextWindow": 1000005,
+            "maxTokens": 65500,
+            "cost": {
+              "input": 0.002,
+              "output": 0.012,
+              "cacheRead": 0.0002,
+              "cacheWrite": 0.00
+            }
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "thinkingDefault": "medium",
+      "workspace": "~/.openclaw/workspace",
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "model": {
+        "primary": "openrouter/moonshotai/kimi-k2.5"
+      }
+    }
+  }
+}
+```
+
+### Model Aliases (Nicknames)
+
+The Discord Orchestration system uses these model aliases:
+
+| Alias | Full Model ID | Cost per 1K tokens |
+|-------|---------------|-------------------|
+| **cheap** | `stepfun/step-3.5-flash:free` | FREE |
+| **primary** | `moonshotai/kimi-k2.5` | $0.00045 in / $0.00225 out |
+| **coder** | `qwen/qwen3-coder-next` | $0.00015 in / $0.0008 out |
+| **research** | `google/gemini-3-pro-preview` | $0.002 in / $0.012 out |
+
+### Setup Steps
+
+1. **Get OpenRouter API Key**: https://openrouter.ai/keys
+2. **Edit config**: `openclaw config edit` or edit `~/.openclaw/openclaw.json` directly
+3. **Add your API key**: Replace `<YOUR-OPENROUTER-KEY-HERE>` with your actual key
+4. **Verify models**: Run `openclaw config get` to check your configuration
+
+**Note**: The cost tracking in Discord results reads from the `models.providers.openrouter.models[].cost` section. Make sure your pricing matches OpenRouter's current rates.
 
 ---
 
