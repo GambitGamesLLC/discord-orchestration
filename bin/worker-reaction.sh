@@ -416,11 +416,13 @@ EOF
             ;;
     esac
     
+    # Update MODEL to the resolved model for correct reporting
+    MODEL="$MODEL_FLAG"
+    
     # For OpenClaw gateway mode, model is set via OPENCLAW_MODEL env var
     # (openclaw agent doesn't have a --model flag, it uses env or config)
-    if [[ -n "$MODEL_FLAG" && "$MODEL_FLAG" != "$MODEL" ]]; then
+    if [[ -n "$MODEL_FLAG" ]]; then
         export OPENCLAW_MODEL="$MODEL_FLAG"
-        MODEL="$MODEL_FLAG"
         echo "[$(date '+%H:%M:%S')] Using requested model: $MODEL_FLAG"
     fi
     
