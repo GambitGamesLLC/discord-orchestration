@@ -173,9 +173,13 @@ except:
     pass
 " 2>/dev/null)
             
-            # Step 4: If not first, we lost - remove our reaction to keep queue clean
-            if [[ -n "$FIRST_REACTOR" && -n "$MY_USER_ID" && "$FIRST_REACTOR" != "$MY_USER_ID" ]]; then
-                echo "[$(date '+%H:%M:%S')] Lost race (check 1) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+            # Step 4: Verify we ARE first (not just that someone else isn't)
+            if [[ -z "$FIRST_REACTOR" || -z "$MY_USER_ID" || "$FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                if [[ -n "$FIRST_REACTOR" && "$FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                    echo "[$(date '+%H:%M:%S')] Lost race (check 1) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                else
+                    echo "[$(date '+%H:%M:%S')] Lost race (check 1) for ${MSG_ID:0:12}... (verification failed)" >&2
+                fi
                 # Remove our reaction since we lost
                 discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                 echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
@@ -213,8 +217,12 @@ except:
 " 2>/dev/null)
                     
                     # Check if we're still first
-                    if [[ -n "$BACKOFF_FIRST_REACTOR" && -n "$MY_USER_ID" && "$BACKOFF_FIRST_REACTOR" != "$MY_USER_ID" ]]; then
-                        echo "[$(date '+%H:%M:%S')] Lost race after backoff attempt ${attempt} for ${MSG_ID:0:12}... (first: ${BACKOFF_FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                    if [[ -z "$BACKOFF_FIRST_REACTOR" || -z "$MY_USER_ID" || "$BACKOFF_FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                        if [[ -n "$BACKOFF_FIRST_REACTOR" && "$BACKOFF_FIRST_REACTOR" != "$MY_USER_ID" ]]; then
+                            echo "[$(date '+%H:%M:%S')] Lost race after backoff attempt ${attempt} for ${MSG_ID:0:12}... (first: ${BACKOFF_FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                        else
+                            echo "[$(date '+%H:%M:%S')] Lost race after backoff attempt ${attempt} for ${MSG_ID:0:12}... (verification failed)" >&2
+                        fi
                         # Remove our reaction since we lost
                         discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                         echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
@@ -245,8 +253,13 @@ except:
 " 2>/dev/null)
             
             # Step 7: Second verification - if not first, we lost
-            if [[ -n "$FIRST_REACTOR2" && -n "$MY_USER_ID" && "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
-                echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR2:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+            # CRITICAL: Must verify we ARE first, not just that we're NOT not-first
+            if [[ -z "$FIRST_REACTOR2" || -z "$MY_USER_ID" || "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
+                if [[ -n "$FIRST_REACTOR2" && "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
+                    echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR2:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                else
+                    echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (verification failed)" >&2
+                fi
                 # Remove our reaction since we lost
                 discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                 echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
@@ -622,6 +635,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
         TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
+        # Post CLAIMED status now that we've verified we won
         post_status "CLAIMED" "Task ID: ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}" || true
         
         # Execute task with error handling
