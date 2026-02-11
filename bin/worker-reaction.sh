@@ -463,6 +463,22 @@ if usage:
             TOKENS_IN=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('input', 'unknown'))" 2>/dev/null || echo "unknown")
             TOKENS_OUT=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output', 'unknown'))" 2>/dev/null || echo "unknown")
             echo "[$(date '+%H:%M:%S')] Extracted tokens: in=${TOKENS_IN}, out=${TOKENS_OUT}"
+            
+            # Calculate cost
+            export COST="N/A"
+            if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
+                local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
+                if [[ -f "$CONFIG_FILE" ]]; then
+                    local INPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                    local OUTPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                    
+                    if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "0" ]]; then
+                        COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
+                        echo "[$(date '+%H:%M:%S')] Calculated cost: $${COST}"
+                    fi
+                fi
+            fi
+            export COST
         fi
     fi
     
@@ -480,6 +496,7 @@ post_result() {
     local THINKING="$4"
     local TOKENS_IN="${5:-unknown}"
     local TOKENS_OUT="${6:-unknown}"
+    local COST="${COST:-N/A}"
     
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
@@ -490,9 +507,25 @@ post_result() {
     local RESULT=""
     [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
     
+    # Calculate cost if we have token data and can read pricing from config
+    local COST="N/A"
+    if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
+        local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
+        if [[ -f "$CONFIG_FILE" ]]; then
+            # Extract cost per 1K tokens for the model from config
+            local INPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
+            local OUTPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
+            
+            if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" ]]; then
+                # Calculate: (tokens / 1000) * cost_per_1k
+                COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
+            fi
+        fi
+    fi
+    
     # Local log with full details
     mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
-    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
+    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${COST}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
     
     # Build debug info with task details
     local WORKSPACE_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
@@ -510,7 +543,7 @@ post_result() {
     local MSG="═══════════════════════════════════════
 
 **[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
-**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out
+**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** $${COST}
 
 **Task Prompt:**
 \`\`\`
