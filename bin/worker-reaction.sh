@@ -478,7 +478,7 @@ if usage:
                     
                     if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "" ]]; then
                         COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
-                        echo "[$(date '+%H:%M:%S')] Calculated cost: \\${COST}"
+                        echo "[$(date '+%H:%M:%S')] Calculated cost: \${COST}"
                     fi
                 fi
             fi
@@ -551,7 +551,7 @@ post_result() {
     local MSG="═══════════════════════════════════════
 
 **[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
-**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \\${COST}
+**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \${COST}
 
 **Task Prompt:**
 \`\`\`
