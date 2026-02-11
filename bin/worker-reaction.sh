@@ -139,15 +139,57 @@ get_task_via_reactions() {
             fi
         fi
         
-        # First-reactor-wins: Try to add reaction, then verify
-        # Step 1: Add our ✅ reaction (attempt claim)
-        local CLAIM_RESPONSE
-        CLAIM_RESPONSE=$(curl -s -X PUT \
-            -H "Authorization: Bot ${BOT_TOKEN}" \
-            "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" 2>&1)
+        # Check if task is already assigned (has ✅ reaction from orchestrator)
+        local EXISTING_REACTIONS
+        EXISTING_REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85")
         
-        # If we successfully added reaction, verify we're first (double-check)
-        if [[ -z "$CLAIM_RESPONSE" ]]; then
+        local REACTION_COUNT
+        REACTION_COUNT=$(echo "$EXISTING_REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); print(len(data) if isinstance(data, list) else 0)" 2>/dev/null)
+        
+        if [[ "${REACTION_COUNT:-0}" -gt 0 ]]; then
+            # Task is already assigned - check if it's assigned to us
+            # Look for orchestrator assignment message in worker pool
+            local ASSIGNMENT_CHECK
+            ASSIGNMENT_CHECK=$(discord_api GET "/channels/${WORKER_POOL_CHANNEL}/messages?limit=20")
+            
+            local ASSIGNED_TO_ME
+            ASSIGNED_TO_ME=$(echo "$ASSIGNMENT_CHECK" | python3 -c "
+import json, sys, re
+data = json.load(sys.stdin)
+for msg in data:
+    content = msg.get('content', '')
+    # Look for assignment message with our worker ID and this task
+    if 'TASK ASSIGNED' in content and '${WORKER_ID}' in content and '${MSG_ID}' in content:
+        print('yes')
+        break
+" 2>/dev/null)
+            
+            if [[ "$ASSIGNED_TO_ME" != "yes" ]]; then
+                echo "[$(date '+%H:%M:%S')] Task ${MSG_ID:0:12}... already assigned to another, skipping" >&2
+                echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
+                continue
+            fi
+            
+            echo "[$(date '+%H:%M:%S')] Task ${MSG_ID:0:12}... assigned to me, proceeding" >&2
+            # Fall through to process the assigned task (no need to add reaction)
+        else
+            # Task not yet assigned - use first-reactor-wins
+            # Step 1: Add our ✅ reaction (attempt claim)
+            local CLAIM_RESPONSE
+            CLAIM_RESPONSE=$(curl -s -X PUT \
+                -H "Authorization: Bot ${BOT_TOKEN}" \
+                "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" 2>&1)
+            
+            # If we successfully added reaction, verify we're first (double-check)
+            if [[ -n "$CLAIM_RESPONSE" ]]; then
+                # Failed to add reaction
+                continue
+            fi
+        fi
+        
+        # Proceed with verification (works for both assignment and claiming paths)
+        if [[ "${REACTION_COUNT:-0}" -eq 0 ]]; then
+            # We just added the reaction in claiming path
             # Step 2: First check with increased jitter (500-1000ms)
             # Longer jitter helps desynchronize workers to reduce race conditions
             local JITTER=$((500 + RANDOM % 500))  # 500-1000ms
