@@ -469,10 +469,12 @@ if usage:
             if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
                 local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
                 if [[ -f "$CONFIG_FILE" ]]; then
-                    local INPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
-                    local OUTPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                    # Strip 'openrouter/' prefix if present (config stores model IDs without prefix)
+                    local MODEL_ID="${MODEL#openrouter/}"
+                    local INPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                    local OUTPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
                     
-                    if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "0" ]]; then
+                    if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "" ]]; then
                         COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
                         echo "[$(date '+%H:%M:%S')] Calculated cost: $${COST}"
                     fi
@@ -512,11 +514,13 @@ post_result() {
     if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
         local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
         if [[ -f "$CONFIG_FILE" ]]; then
+            # Strip 'openrouter/' prefix if present (config stores model IDs without prefix)
+            local MODEL_ID="${MODEL#openrouter/}"
             # Extract cost per 1K tokens for the model from config
-            local INPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
-            local OUTPUT_COST=$(jq -r --arg model "$MODEL" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
+            local INPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
+            local OUTPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
             
-            if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" ]]; then
+            if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "" ]]; then
                 # Calculate: (tokens / 1000) * cost_per_1k
                 COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
             fi
