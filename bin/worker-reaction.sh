@@ -436,16 +436,14 @@ EOF
     export TOKENS_IN="unknown"
     export TOKENS_OUT="unknown"
     
-    # Run agent
-    if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
-        
-        # Extract tokens from session transcript file (more reliable than agent output)
-        # Session file: ~/.openclaw/agents/main/sessions/{worker-id}-{task-id}.jsonl
-        local SESSION_FILE="${HOME}/.openclaw/agents/main/sessions/${WORKER_ID}-${TASK_ID}.jsonl"
-        if [[ -f "$SESSION_FILE" ]]; then
-            # Find the last assistant message with usage data
-            local TOKENS_JSON
-            TOKENS_JSON=$(tail -20 "$SESSION_FILE" | python3 -c "
+    # Run agent (don't exit on error - we still want to extract tokens)
+    timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1 || true
+    
+    # ALWAYS try to extract tokens from session file (even if agent timed out)
+    local SESSION_FILE="${HOME}/.openclaw/agents/main/sessions/${WORKER_ID}-${TASK_ID}.jsonl"
+    if [[ -f "$SESSION_FILE" ]]; then
+        local TOKENS_JSON
+        TOKENS_JSON=$(tail -20 "$SESSION_FILE" 2>/dev/null | python3 -c "
 import json,sys
 usage = None
 for line in sys.stdin:
@@ -459,19 +457,18 @@ for line in sys.stdin:
         pass
 if usage:
     print(json.dumps(usage))
-" 2>/dev/null)
-            
-            if [[ -n "$TOKENS_JSON" ]]; then
-                TOKENS_IN=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('input', 'unknown'))" 2>/dev/null)
-                TOKENS_OUT=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output', 'unknown'))" 2>/dev/null)
-                echo "[$(date '+%H:%M:%S')] Extracted tokens from session: in=${TOKENS_IN}, out=${TOKENS_OUT}"
-            fi
-        fi
+" 2>/dev/null) || true
         
-        # Check for RESULT.txt in isolated task dir (preferred)
-        if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
-            return 0
+        if [[ -n "$TOKENS_JSON" ]]; then
+            TOKENS_IN=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('input', 'unknown'))" 2>/dev/null || echo "unknown")
+            TOKENS_OUT=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output', 'unknown'))" 2>/dev/null || echo "unknown")
+            echo "[$(date '+%H:%M:%S')] Extracted tokens: in=${TOKENS_IN}, out=${TOKENS_OUT}"
         fi
+    fi
+    
+    # Check for RESULT.txt - success if it exists (regardless of agent exit code)
+    if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
+        return 0
     fi
     return 1
 }
