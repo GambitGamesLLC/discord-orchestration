@@ -12,8 +12,9 @@ WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 POLL_INTERVAL="${POLL_INTERVAL:-5}"
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-300}"
 MY_USER_ID=""  # Cached bot user ID for first-reactor-wins logic
-LOST_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-lost-messages.txt"  # Cache messages we've lost on
-COMPLETED_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-completed-messages.txt"  # Cache messages we've completed
+# Cache files for race losses and completed tasks (in /tmp for temp storage)
+LOST_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-lost-messages.txt"
+COMPLETED_MESSAGES_FILE="/tmp/discord-workers/${WORKER_ID}-completed-messages.txt"
 
 # Discord API helper
 discord_api() {
