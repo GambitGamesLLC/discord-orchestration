@@ -430,14 +430,29 @@ EOF
         echo "[$(date '+%H:%M:%S')] Using agent config: ${AGENT_CONFIG}"
     fi
     
-    AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING}"
+    AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING} --json"
     
-    if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
-        
-        # Check for RESULT.txt in isolated task dir (preferred)
-        if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
-            return 0
-        fi
+    # Export tokens so post_result can access them
+    export TOKENS_IN="unknown"
+    export TOKENS_OUT="unknown"
+    
+    # Run agent and capture JSON output
+    local AGENT_OUTPUT
+    AGENT_OUTPUT=$(timeout 120 bash -c "$AGENT_CMD" 2>&1)
+    local AGENT_EXIT_CODE=$?
+    
+    # Save output to log for debugging
+    echo "$AGENT_OUTPUT" > agent-output.log
+    
+    # Extract tokens from JSON output
+    if [[ $AGENT_EXIT_CODE -eq 0 ]]; then
+        TOKENS_IN=$(echo "$AGENT_OUTPUT" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['result']['meta']['agentMeta']['usage']['input'])" 2>/dev/null || echo "unknown")
+        TOKENS_OUT=$(echo "$AGENT_OUTPUT" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['result']['meta']['agentMeta']['usage']['output'])" 2>/dev/null || echo "unknown")
+    fi
+    
+    # Check for RESULT.txt in isolated task dir (preferred)
+    if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
+        return 0
     fi
     return 1
 }
@@ -526,17 +541,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         post_status "CLAIMED" "Task ID: ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
         
         if execute_task "$TASK"; then
-            # Try to get token usage from agent output
-            TOKENS_IN="unknown"
-            TOKENS_OUT="unknown"
-            
-            # Look for token usage in agent output
-            if [[ -f agent-output.log ]]; then
-                # Try to extract from OpenClaw output (format varies)
-                TOKENS_IN=$(grep -o '"input_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
-                TOKENS_OUT=$(grep -o '"output_tokens":[0-9]*' agent-output.log | head -1 | cut -d: -f2 || echo "unknown")
-            fi
-            
+            # Tokens are already extracted in execute_task and exported
             post_result "SUCCESS" "$TASK" "$MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
         else
             post_result "FAILED" "$TASK" "$MODEL" "$TASK_THINKING" "N/A" "N/A"
