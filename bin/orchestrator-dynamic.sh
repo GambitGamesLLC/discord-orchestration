@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # orchestrator-dynamic.sh - Dynamic agent spawning orchestrator
+# Spawns fresh workers per task (like old workers but dynamically)
 
 set -euo pipefail
 
@@ -21,7 +22,9 @@ WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 RUNTIME_DIR="${REPO_DIR}/.runtime"
 ASSIGNED_FILE="${RUNTIME_DIR}/assigned-tasks.txt"
 mkdir -p "$RUNTIME_DIR"
-mkdir -p "${REPO_DIR}/agents"
+
+WORKERS_DIR="${REPO_DIR}/workers"
+mkdir -p "$WORKERS_DIR"
 
 # Discord API helper
 discord_api() {
@@ -117,14 +120,15 @@ spawn_agent() {
     local TASK_DESC="$4"
     
     local AGENT_ID="agent-$(date +%s)-${RANDOM}"
-    local AGENT_DIR="${REPO_DIR}/agents/${AGENT_ID}"
+    local WORKER_STATE_DIR="${WORKERS_DIR}/${AGENT_ID}"
+    local TASK_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
     
     echo "[$(date '+%H:%M:%S')] Spawning agent for task ${TASK_ID:0:12}..."
     
-    # Create workspace
-    mkdir -p "$AGENT_DIR"
+    # Create workspace (exactly like old workers)
+    mkdir -p "$TASK_DIR"
     
-    # Map model alias
+    # Map model alias to full name
     local MODEL_FLAG=""
     case "$MODEL" in
         "cheap"|"step-3.5-flash:free")
@@ -147,37 +151,50 @@ spawn_agent() {
             ;;
     esac
     
-    # Write AGENTS.md (critical - tells agent what to do)
-    cat > "${AGENT_DIR}/AGENTS.md" << EOF
-# Agent ${AGENT_ID}
+    # Write AGENTS.md (EXACT format from old workers)
+    cat > "${WORKER_STATE_DIR}/AGENTS.md" << EOF
+# ${AGENT_ID}
 
 ## Task
 ${TASK_DESC}
 
-## Model
-${MODEL_FLAG}
+## Model Defaults
+- Primary: openrouter/moonshotai/kimi-k2.5
+- Cheap: openrouter/stepfun/step-3.5-flash:free
+- Coder: openrouter/qwen/qwen3-coder-next
+- Research: openrouter/google/gemini-3-pro-preview
 
-## Instructions
-Complete the task and write the result to RESULT.txt in ${AGENT_DIR}/
+## Output
+Write result to RESULT.txt
+EOF
+    
+    # Copy TOOLS.md if it exists (like old workers)
+    if [[ -f "${WORKERS_DIR}/TOOLS.md" ]]; then
+        cp "${WORKERS_DIR}/TOOLS.md" "${WORKER_STATE_DIR}/TOOLS.md"
+    fi
+    
+    # Write TASK.txt (like old workers)
+    cat > "${TASK_DIR}/TASK.txt" << EOF
+TASK: ${TASK_DESC}
 EOF
     
     # Post notice
     discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
         "{\"content\":\"🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`\"}" > /dev/null 2>&1 || true
     
-    # Spawn agent in background
+    # Spawn agent in background (EXACT command from old workers)
     (
         export OPENCLAW_MODEL="$MODEL_FLAG"
-        export OPENCLAW_STATE_DIR="$AGENT_DIR"
+        export OPENCLAW_STATE_DIR="$WORKER_STATE_DIR"
         
-        cd "$AGENT_DIR"
+        cd "$TASK_DIR"
         
-        # Run agent
+        # Run agent (EXACT command from old workers)
         timeout 120 openclaw agent \
-            --session-id "${AGENT_ID}" \
-            --message "Complete the task described in AGENTS.md. Write the result to RESULT.txt." \
+            --session-id "${AGENT_ID}-${TASK_ID}" \
+            --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
             --thinking "${THINKING}" \
-            > agent.log 2>&1 || true
+            > agent-output.log 2>&1 || true
         
         # Check for result
         if [[ -f "RESULT.txt" ]]; then
@@ -186,11 +203,11 @@ EOF
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"${MSG}\"}" > /dev/null 2>&1 || true
         else
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" \
-                "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result\"}" > /dev/null 2>&1 || true
+                "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result produced\"}" > /dev/null 2>&1 || true
         fi
         
         # Cleanup
-        rm -rf "$AGENT_DIR"
+        rm -rf "$WORKER_STATE_DIR"
         
         discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
             "{\"content\":\"✅ Agent \`${AGENT_ID}\` finished\"}" > /dev/null 2>&1 || true
