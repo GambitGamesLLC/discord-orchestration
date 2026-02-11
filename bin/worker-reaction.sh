@@ -215,6 +215,9 @@ execute_task() {
     local REQUESTED_MODEL=$(echo "$TASK_DATA" | cut -d'|' -f3)
     local THINKING=$(echo "$TASK_DATA" | cut -d'|' -f4)
     
+    # Check if agent config specified
+    AGENT_CONFIG="${AGENT_CONFIG:-}"
+    
     # Local agent always uses default model from config
     # Get actual default model
     DEFAULT_MODEL=$(cat ~/.openclaw/openclaw.json 2>/dev/null | grep '"primary"' | cut -d'"' -f4 || echo "unknown")
@@ -229,6 +232,7 @@ execute_task() {
     
     echo "[$(date '+%H:%M:%S')] Executing: ${TASK_DESC:0:50}..."
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
+    [[ -n "$AGENT_CONFIG" ]] && echo "[$(date '+%H:%M:%S')] Using agent config: $AGENT_CONFIG"
     
     # Gateway-attached worker: uses OpenClaw default workspace (no sandbox)
     # Workers now have full filesystem access like standard OpenClaw agents
@@ -260,11 +264,18 @@ EOF
     cd "$TASK_DIR"
     
     # Gateway-attached agent (no --local flag) - full filesystem access
-    if timeout 120 openclaw agent \
-        --session-id "${WORKER_ID}-${TASK_ID}" \
-        --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
-        --thinking "$THINKING" \
-        > agent-output.log 2>&1; then
+    # Build agent command with optional agent config for model selection
+    local AGENT_CMD="openclaw agent --session-id ${WORKER_ID}-${TASK_ID}"
+    
+    # Add agent config if specified (for cheap/smart/coding/research workers)
+    if [[ -n "$AGENT_CONFIG" ]]; then
+        AGENT_CMD="${AGENT_CMD} --agent ${AGENT_CONFIG}"
+        echo "[$(date '+%H:%M:%S')] Using agent: ${AGENT_CONFIG}"
+    fi
+    
+    AGENT_CMD="${AGENT_CMD} --message \"Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/\" --thinking ${THINKING}"
+    
+    if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
         
         # Check for RESULT.txt in task dir (agent may write it there if instructed)
         # or in root workspace (default behavior)
