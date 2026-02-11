@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # orchestrator-dynamic.sh - Dynamic agent spawning orchestrator
-# No persistent workers. Fresh agent per task.
+# Uses openclaw --local mode for embedded execution
 
 set -euo pipefail
 
@@ -107,8 +107,9 @@ parse_task() {
         THINKING="${BASH_REMATCH[1]}"
     fi
     
+    # Clean up task description
     local DESC="$CONTENT"
-    DESC=$(echo "$DESC" | sed 's/\[model:[^]]*\]//g; s/\[thinking:[^]]*\]//g')
+    DESC=$(echo "$DESC" | sed 's/\[model:[^]]*\]//g; s/\[thinking:[^]]*\]//g; s/\*\*//g')
     DESC=$(echo "$DESC" | sed 's/^ *//;s/ *$//')
     
     echo "$MODEL|$THINKING|$DESC"
@@ -129,36 +130,67 @@ spawn_agent() {
     local ASSIGN_MSG="🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`\\nModel: ${MODEL} | Thinking: ${THINKING}"
     discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" "{\"content\":\"${ASSIGN_MSG}\"}" > /dev/null 2>&1 || true
     
-    # Create workspace
-    local AGENT_DIR="${REPO_DIR}/agents/${AGENT_ID}"
-    mkdir -p "$AGENT_DIR"
+    # Map model alias to full name for OpenRouter
+    local MODEL_FLAG=""
+    case "$MODEL" in
+        "cheap"|"step-3.5-flash:free")
+            MODEL_FLAG="openrouter/stepfun/step-3.5-flash:free"
+            ;;
+        "coder"|"qwen3-coder-next")
+            MODEL_FLAG="openrouter/qwen/qwen3-coder-next"
+            ;;
+        "research"|"gemini-3-pro-preview")
+            MODEL_FLAG="openrouter/google/gemini-3-pro-preview"
+            ;;
+        "primary"|"kimi-k2.5")
+            MODEL_FLAG="openrouter/moonshotai/kimi-k2.5"
+            ;;
+        openrouter/*)
+            MODEL_FLAG="$MODEL"
+            ;;
+        *)
+            MODEL_FLAG="openrouter/moonshotai/kimi-k2.5"
+            ;;
+    esac
     
-    # Write task file
-    cat > "${AGENT_DIR}/TASK.txt" << EOF
-TASK ID: ${TASK_ID}
-MODEL: ${MODEL}
-THINKING: ${THINKING}
-
-${TASK_DESC}
-EOF
-
-    # Spawn agent in background
+    # Spawn agent in background using openclaw --local
     (
-        cd "$AGENT_DIR"
-        local AGENT_CMD="openclaw agent --session-id ${AGENT_ID} --message \"Complete the task in TASK.txt. Write the result to RESULT.txt.\" --thinking ${THINKING}"
-        export OPENCLAW_MODEL="$MODEL"
+        echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} starting..."
         
-        timeout 120 bash -c "$AGENT_CMD" > agent.log 2>&1 || true
+        # Run openclaw agent in local mode
+        # Capture output to file first
+        local OUTPUT_FILE="/tmp/${AGENT_ID}.txt"
         
-        if [[ -f "RESULT.txt" ]]; then
-            local RESULT=$(cat RESULT.txt 2>/dev/null)
-            local RESULT_MSG="✅ **SUCCESS** \`${TASK_ID}\` by **${AGENT_ID}**\\n\\n**Result:**\\n\`\`\`${RESULT:0:800}\`\`\`"
+        export OPENCLAW_MODEL="$MODEL_FLAG"
+        
+        # Use openclaw agent --local with proper message
+        timeout 120 openclaw agent \
+            --local \
+            --session-id "${AGENT_ID}" \
+            --message "${TASK_DESC}" \
+            --thinking "${THINKING}" \
+            > "$OUTPUT_FILE" 2>&1 || true
+        
+        # Extract result from output (last part after agent completes)
+        local RESULT
+        RESULT=$(tail -50 "$OUTPUT_FILE" 2>/dev/null | grep -v "^🦞" | tail -30)
+        
+        if [[ -n "$RESULT" && ${#RESULT} -gt 10 ]]; then
+            # Success - post to Discord
+            local RESULT_MSG="✅ **SUCCESS** \`${TASK_ID}\` by **${AGENT_ID}**\\n\\n**Result:**\\n\`\`\`${RESULT:0:1500}\`\`\`"
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"${RESULT_MSG}\"}" > /dev/null 2>&1 || true
+            echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} completed successfully"
         else
-            discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result\"}" > /dev/null 2>&1 || true
+            # Failed - post failure
+            discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - Agent produced no result\"}" > /dev/null 2>&1 || true
+            echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} failed"
         fi
         
-        rm -rf "$AGENT_DIR"
+        # Cleanup
+        rm -f "$OUTPUT_FILE"
+        
+        # Post completion notice
+        discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" "{\"content\":\"✅ Agent \`${AGENT_ID}\` finished\"}" > /dev/null 2>&1 || true
     ) &
     
     echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} spawned (PID: $!)"
@@ -189,4 +221,4 @@ while IFS='|' read -r TASK_ID TASK_CONTENT; do
     
 done <<< "$PENDING"
 
-echo "[$(date '+%H:%M:%S')] Orchestration complete."
+echo "[$(date '+%H:%M:%S')] Orchestration complete. Agents running in background."
