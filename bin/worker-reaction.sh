@@ -528,12 +528,12 @@ post_result() {
             fi
         fi
     fi
-    # Ensure COST is set for logging
-    COST="${COST:-N/A}"
+    # Ensure COST is set for Discord message
+    local DISPLAY_COST="${COST:-N/A}"
     
     # Local log with full details
     mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
-    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${COST}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
+    echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${DISPLAY_COST}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
     
     # Build debug info with task details
     local WORKSPACE_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
@@ -541,7 +541,7 @@ post_result() {
     
     # List modified files in workspace
     if [[ -d "$WORKSPACE_DIR" ]]; then
-        local FILES=$(ls -1 "$WORKSPACE_DIR" 2>/dev/null | head -10 | tr '\n' ', ')
+        local FILES=$(ls -1 "$WORKSPACE_DIR" 2>/dev/null | head -10 | tr '\n' ', ' | sed 's/,/, /g')
         [[ -n "$FILES" ]] && DEBUG_INFO="\n**Files:** ${FILES%, }"
     fi
     
@@ -551,7 +551,7 @@ post_result() {
     local MSG="═══════════════════════════════════════
 
 **[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
-**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${COST}
+**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${DISPLAY_COST}
 
 **Task Prompt:**
 \`\`\`
