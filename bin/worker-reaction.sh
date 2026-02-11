@@ -148,8 +148,9 @@ get_task_via_reactions() {
         
         # If we successfully added reaction, verify we're first (double-check)
         if [[ -z "$CLAIM_RESPONSE" ]]; then
-            # Step 2: First check with increased jitter (200-500ms)
-            local JITTER=$((200 + RANDOM % 300))  # 200-500ms (increased from 100-300ms)
+            # Step 2: First check with increased jitter (500-1000ms)
+            # Longer jitter helps desynchronize workers to reduce race conditions
+            local JITTER=$((500 + RANDOM % 500))  # 500-1000ms
             sleep "0.${JITTER}"
             
             # Get our user ID if not cached
@@ -172,9 +173,11 @@ except:
     pass
 " 2>/dev/null)
             
-            # Step 4: If not first, we lost
+            # Step 4: If not first, we lost - remove our reaction to keep queue clean
             if [[ -n "$FIRST_REACTOR" && -n "$MY_USER_ID" && "$FIRST_REACTOR" != "$MY_USER_ID" ]]; then
                 echo "[$(date '+%H:%M:%S')] Lost race (check 1) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                # Remove our reaction since we lost
+                discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                 echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
                 continue
             fi
@@ -212,6 +215,8 @@ except:
                     # Check if we're still first
                     if [[ -n "$BACKOFF_FIRST_REACTOR" && -n "$MY_USER_ID" && "$BACKOFF_FIRST_REACTOR" != "$MY_USER_ID" ]]; then
                         echo "[$(date '+%H:%M:%S')] Lost race after backoff attempt ${attempt} for ${MSG_ID:0:12}... (first: ${BACKOFF_FIRST_REACTOR:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                        # Remove our reaction since we lost
+                        discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                         echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
                         continue 2  # Continue to next message
                     fi
@@ -242,6 +247,8 @@ except:
             # Step 7: Second verification - if not first, we lost
             if [[ -n "$FIRST_REACTOR2" && -n "$MY_USER_ID" && "$FIRST_REACTOR2" != "$MY_USER_ID" ]]; then
                 echo "[$(date '+%H:%M:%S')] Lost race (check 2) for ${MSG_ID:0:12}... (first: ${FIRST_REACTOR2:0:12}, me: ${MY_USER_ID:0:12}), caching" >&2
+                # Remove our reaction since we lost
+                discord_api DELETE "/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
                 echo "$MSG_ID" >> "$LOST_MESSAGES_FILE"
                 continue
             fi
