@@ -525,7 +525,10 @@ ${RESULT:0:800}
 
 📁 **Workspace:** \`${WORKSPACE_DIR}\`"
     
-    post_to_discord "$RESULTS_CHANNEL" "$MSG"
+    # Post to Discord with error handling (don't crash if Discord fails)
+    if ! post_to_discord "$RESULTS_CHANNEL" "$MSG" 2>/dev/null; then
+        echo "[$(date '+%H:%M:%S')] ⚠️ Failed to post to Discord #results, but task completed successfully" >&2
+    fi
 }
 
 post_status() {
@@ -539,7 +542,7 @@ post_status() {
 
 # Main
 echo "[$(date '+%H:%M:%S')] Worker ${WORKER_ID} starting (gateway-attached, full filesystem access)..."
-post_status "READY" "Online and waiting (non-sandboxed)"
+post_status "READY" "Online and waiting (non-sandboxed)" || true
 
 IDLE_TIME=0
 while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
@@ -557,13 +560,19 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         TASK_MODEL=$(echo "$TASK" | cut -d'|' -f3)
         TASK_THINKING=$(echo "$TASK" | cut -d'|' -f4)
         
-        post_status "CLAIMED" "Task ID: ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}"
+        post_status "CLAIMED" "Task ID: ${TASK%%|*} | Model: ${TASK_MODEL} | Thinking: ${TASK_THINKING}" || true
         
+        # Execute task with error handling
         if execute_task "$TASK"; then
             # Tokens are already extracted in execute_task and exported
-            post_result "SUCCESS" "$TASK" "$MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT"
+            # Log locally first (always works)
+            echo "${TASK%%|*}|${WORKER_ID}|SUCCESS|$(date +%s)|${MODEL}|${TASK_THINKING}|${TOKENS_IN:-unknown}|${TOKENS_OUT:-unknown}|Task completed" >> "${RUNTIME_DIR}/results.txt"
+            # Then try to post to Discord
+            post_result "SUCCESS" "$TASK" "$MODEL" "$TASK_THINKING" "$TOKENS_IN" "$TOKENS_OUT" || true
         else
-            post_result "FAILED" "$TASK" "$MODEL" "$TASK_THINKING" "N/A" "N/A"
+            # Log failure locally
+            echo "${TASK%%|*}|${WORKER_ID}|FAILED|$(date +%s)|${MODEL}|${TASK_THINKING}|N/A|N/A|Task execution failed" >> "${RUNTIME_DIR}/results.txt"
+            post_result "FAILED" "$TASK" "$MODEL" "$TASK_THINKING" "N/A" "N/A" || true
         fi
         
         # Cache this task as completed to prevent re-claiming after restart
@@ -575,7 +584,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
             echo "[$(date '+%H:%M:%S')] Cached completed task: ${COMPLETED_MSG_ID:0:12}..."
         fi
         
-        post_status "RESTARTING" "Task complete"
+        post_status "RESTARTING" "Task complete" || true
         exit 0
     fi
     
