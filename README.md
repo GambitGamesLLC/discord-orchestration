@@ -311,6 +311,8 @@ Discord Orchestration requires OpenClaw with multiple model configurations. Here
 
 ### Example Configuration
 
+**⚠️ Note:** These models are examples from early 2026. You should swap them out for the best models available in your time period. Check https://openrouter.ai/models for current pricing and capabilities.
+
 ```json
 {
   "env": {
@@ -395,9 +397,37 @@ Discord Orchestration requires OpenClaw with multiple model configurations. Here
 }
 ```
 
+### Converting OpenRouter Pricing to OpenClaw Format
+
+**Important:** OpenClaw's cost values are **per 1,000 tokens**, but OpenRouter displays prices **per 1,000,000 tokens**.
+
+**Conversion Formula:**
+```
+openclaw_cost = openrouter_price_per_1m ÷ 1000
+
+Examples:
+- OpenRouter: $0.50 per 1M input tokens
+  → OpenClaw: 0.50 ÷ 1000 = 0.0005
+
+- OpenRouter: $2.25 per 1M output tokens
+  → OpenClaw: 2.25 ÷ 1000 = 0.00225
+
+- OpenRouter: FREE ($0.00 per 1M)
+  → OpenClaw: 0.00
+```
+
+**Quick Reference:**
+| OpenRouter (per 1M) | OpenClaw (per 1K) |
+|--------------------|-------------------|
+| $0.15 | 0.00015 |
+| $0.50 | 0.0005 |
+| $2.25 | 0.00225 |
+| $12.00 | 0.012 |
+| $0.00 (FREE) | 0.00 |
+
 ### Model Aliases (Nicknames)
 
-The Discord Orchestration system uses these model aliases:
+The Discord Orchestration system uses these model aliases (customize these to match your config):
 
 | Alias | Full Model ID | Cost per 1K tokens |
 |-------|---------------|-------------------|
@@ -406,14 +436,18 @@ The Discord Orchestration system uses these model aliases:
 | **coder** | `qwen/qwen3-coder-next` | $0.00015 in / $0.0008 out |
 | **research** | `google/gemini-3-pro-preview` | $0.002 in / $0.012 out |
 
+**💡 Tip:** These are just examples from early 2026. Check https://openrouter.ai/models for current best models and pricing in your time period. Update the aliases in `bin/worker-reaction.sh` to match your preferred models.
+
 ### Setup Steps
 
 1. **Get OpenRouter API Key**: https://openrouter.ai/keys
 2. **Edit config**: `openclaw config edit` or edit `~/.openclaw/openclaw.json` directly
 3. **Add your API key**: Replace `<YOUR-OPENROUTER-KEY-HERE>` with your actual key
-4. **Verify models**: Run `openclaw config get` to check your configuration
+4. **Convert pricing**: Use the formula above to convert OpenRouter's per-1M pricing to OpenClaw's per-1K format
+5. **Customize models**: Replace the example models with the best available models for your use case
+6. **Verify config**: Run `openclaw config get` to check your configuration
 
-**Note**: The cost tracking in Discord results reads from the `models.providers.openrouter.models[].cost` section. Make sure your pricing matches OpenRouter's current rates.
+**Note**: The cost tracking in Discord results reads from the `models.providers.openrouter.models[].cost` section. Make sure your pricing matches OpenRouter's current rates and uses the **per 1K token** format.
 
 ---
 
