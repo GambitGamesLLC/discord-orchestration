@@ -259,6 +259,41 @@ get_task_from_file() {
     echo "$found_task"
 }
 
+# Setup isolated worker state directory
+setup_worker_state() {
+    local WORKER_STATE_DIR="${WORKERS_DIR}/${WORKER_ID}"
+    
+    # Create worker state directory
+    mkdir -p "$WORKER_STATE_DIR"
+    
+    # Only write AGENTS.md if task context is provided
+    if [[ -n "$TASK_DESC" ]]; then
+        cat > "${WORKER_STATE_DIR}/AGENTS.md" << EOF
+# Worker ${WORKER_ID}
+
+## Task
+${TASK_DESC}
+
+## Model Defaults
+- Primary: openrouter/moonshotai/kimi-k2.5
+- Cheap: openrouter/stepfun/step-3.5-flash:free
+- Coder: openrouter/qwen/qwen3-coder-next
+- Research: openrouter/google/gemini-3-pro-preview
+
+## Output
+Write result to RESULT.txt
+EOF
+    fi
+    
+    # Copy TOOLS.md if it exists (for env-specific tools)
+    if [[ -f "${WORKERS_DIR}/TOOLS.md" ]]; then
+        cp "${WORKERS_DIR}/TOOLS.md" "${WORKER_STATE_DIR}/TOOLS.md"
+    fi
+    
+    # Export OPENCLAW_STATE_DIR for isolated worker state
+    export OPENCLAW_STATE_DIR="${WORKER_STATE_DIR}"
+}
+
 execute_task() {
     local TASK_DATA="$1"
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
@@ -283,46 +318,21 @@ execute_task() {
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
     [[ -n "$AGENT_CONFIG" ]] && echo "[$(date '+%H:%M:%S')] Using agent config: $AGENT_CONFIG"
     
-    # Configurable workspace - defaults to workers/ subdir in project
-    # Workers use isolated directory to prevent config corruption
-    local WORKSPACE="${WORKER_WORKSPACE:-$WORKERS_DIR}"
-    local TASK_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
-    # OpenClaw still needs its config from default location
-    local OPENCLAW_WORKSPACE="$HOME/.openclaw/workspace"
+    # Setup isolated worker state directory using OPENCLAW_STATE_DIR
+    setup_worker_state
     
-    # Create task subfolder for outputs (isolated from .openclaw/)
+    # Task output directory (inside worker state)
+    local WORKER_STATE_DIR="${WORKERS_DIR}/${WORKER_ID}"
+    local TASK_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
+    
+    # Create task subfolder for outputs
     mkdir -p "$TASK_DIR"
     
-    # OpenClaw agent reads from its default workspace, so write task files there
-    # But keep all worker outputs in isolated TASK_DIR
-    # Backup any existing AGENTS.md first
-    if [[ -f "${OPENCLAW_WORKSPACE}/AGENTS.md" ]]; then
-        mv "${OPENCLAW_WORKSPACE}/AGENTS.md" "${OPENCLAW_WORKSPACE}/AGENTS.md.backup.$$" 2>/dev/null || true
-    fi
-    
-    cat > "${OPENCLAW_WORKSPACE}/AGENTS.md" << EOF
-# Worker ${WORKER_ID}
-
-## Task
-${TASK_DESC}
-
-## Model Defaults
-- Primary: openrouter/moonshotai/kimi-k2.5
-- Cheap: openrouter/stepfun/step-3.5-flash:free
-- Coder: openrouter/qwen/qwen3-coder-next
-- Research: openrouter/google/gemini-3-pro-preview
-
-## Output
-Write result to RESULT.txt
-EOF
-
-    cat > "${OPENCLAW_WORKSPACE}/TASK.txt" << EOF
+    # Write task context to isolated task directory
+    cat > "${TASK_DIR}/TASK.txt" << EOF
 TASK: ${TASK_DESC}
 EOF
 
-    # Copy task files to isolated dir for reference
-    cp "${OPENCLAW_WORKSPACE}/AGENTS.md" "${OPENCLAW_WORKSPACE}/TASK.txt" "$TASK_DIR/"
-    
     cd "$TASK_DIR"
     
     # Gateway-attached agent (no --local flag) - full filesystem access
@@ -372,13 +382,8 @@ EOF
     
     if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
         
-        # Check for RESULT.txt in isolated task dir first (preferred)
-        # Fallback to openclaw workspace if agent wrote there
+        # Check for RESULT.txt in isolated task dir (preferred)
         if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
-            return 0
-        elif [[ -f "${OPENCLAW_WORKSPACE}/RESULT.txt" ]]; then
-            cp "${OPENCLAW_WORKSPACE}/RESULT.txt" "${TASK_DIR}/RESULT.txt"
-            rm "${OPENCLAW_WORKSPACE}/RESULT.txt"  # Clean up after copying
             return 0
         fi
     fi
@@ -397,10 +402,8 @@ post_result() {
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
     
     # Use project workers directory (auto-created at startup)
-    local WORKSPACE="${WORKER_WORKSPACE:-$WORKERS_DIR}"
-    local RESULT_FILE="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}/RESULT.txt"
-    # Fallback to openclaw workspace if needed
-    [[ ! -f "$RESULT_FILE" ]] && RESULT_FILE="$HOME/.openclaw/workspace/RESULT.txt"
+    local WORKER_STATE_DIR="${WORKERS_DIR}/${WORKER_ID}"
+    local RESULT_FILE="${WORKER_STATE_DIR}/tasks/${TASK_ID}/RESULT.txt"
     local RESULT=""
     [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
     
@@ -409,7 +412,7 @@ post_result() {
     echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> "${RUNTIME_DIR}/results.txt"
     
     # Build debug info with task details
-    local WORKSPACE_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
+    local WORKSPACE_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
     local DEBUG_INFO=""
     
     # List modified files in workspace
