@@ -551,7 +551,7 @@ post_result() {
     local MSG="═══════════════════════════════════════
 
 **[${STATUS}]** \`${TASK_ID}\` by **${WORKER_ID}**
-**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** ${COST}
+**Model:** ${MODEL} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${COST}
 
 **Task Prompt:**
 \`\`\`
