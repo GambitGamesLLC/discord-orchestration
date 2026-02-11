@@ -234,32 +234,35 @@ execute_task() {
     echo "[$(date '+%H:%M:%S')] Using model: $MODEL"
     [[ -n "$AGENT_CONFIG" ]] && echo "[$(date '+%H:%M:%S')] Using agent config: $AGENT_CONFIG"
     
-    # Gateway-attached worker: uses OpenClaw default workspace (no sandbox)
-    # Workers now have full filesystem access like standard OpenClaw agents
-    local WORKSPACE="$HOME/.openclaw/workspace"
+    # Configurable workspace - defaults to outside .openclaw/ for safety
+    # Workers use isolated directory to prevent config corruption
+    local WORKSPACE="${WORKER_WORKSPACE:-$HOME/Documents/discord-workers}"
     local TASK_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
+    # OpenClaw still needs its config from default location
+    local OPENCLAW_WORKSPACE="$HOME/.openclaw/workspace"
     
-    # Create task subfolder for outputs
+    # Create task subfolder for outputs (isolated from .openclaw/)
     mkdir -p "$TASK_DIR"
     
-    # IMPORTANT: openclaw agent always uses root workspace, so we write task files there
+    # OpenClaw agent reads from its default workspace, so write task files there
+    # But keep all worker outputs in isolated TASK_DIR
     # Backup any existing AGENTS.md first
-    if [[ -f "${WORKSPACE}/AGENTS.md" ]]; then
-        mv "${WORKSPACE}/AGENTS.md" "${WORKSPACE}/AGENTS.md.backup.$$" 2>/dev/null || true
+    if [[ -f "${OPENCLAW_WORKSPACE}/AGENTS.md" ]]; then
+        mv "${OPENCLAW_WORKSPACE}/AGENTS.md" "${OPENCLAW_WORKSPACE}/AGENTS.md.backup.$$" 2>/dev/null || true
     fi
     
-    cat > "${WORKSPACE}/AGENTS.md" << EOF
+    cat > "${OPENCLAW_WORKSPACE}/AGENTS.md" << EOF
 # Worker ${WORKER_ID}
 Task: ${TASK_DESC}
 Write result to RESULT.txt
 EOF
 
-    cat > "${WORKSPACE}/TASK.txt" << EOF
+    cat > "${OPENCLAW_WORKSPACE}/TASK.txt" << EOF
 TASK: ${TASK_DESC}
 EOF
 
-    # Also copy to task dir for reference
-    cp "${WORKSPACE}/AGENTS.md" "${WORKSPACE}/TASK.txt" "$TASK_DIR/"
+    # Copy task files to isolated dir for reference
+    cp "${OPENCLAW_WORKSPACE}/AGENTS.md" "${OPENCLAW_WORKSPACE}/TASK.txt" "$TASK_DIR/"
     
     cd "$TASK_DIR"
     
@@ -277,12 +280,13 @@ EOF
     
     if timeout 120 bash -c "$AGENT_CMD" > agent-output.log 2>&1; then
         
-        # Check for RESULT.txt in task dir (agent may write it there if instructed)
-        # or in root workspace (default behavior)
+        # Check for RESULT.txt in isolated task dir first (preferred)
+        # Fallback to openclaw workspace if agent wrote there
         if [[ -f "${TASK_DIR}/RESULT.txt" ]]; then
             return 0
-        elif [[ -f "${WORKSPACE}/RESULT.txt" ]]; then
-            cp "${WORKSPACE}/RESULT.txt" "${TASK_DIR}/RESULT.txt"
+        elif [[ -f "${OPENCLAW_WORKSPACE}/RESULT.txt" ]]; then
+            cp "${OPENCLAW_WORKSPACE}/RESULT.txt" "${TASK_DIR}/RESULT.txt"
+            rm "${OPENCLAW_WORKSPACE}/RESULT.txt"  # Clean up after copying
             return 0
         fi
     fi
@@ -300,9 +304,10 @@ post_result() {
     local TASK_ID=$(echo "$TASK_DATA" | cut -d'|' -f1)
     local TASK_DESC=$(echo "$TASK_DATA" | cut -d'|' -f2)
     
-    # Updated path for non-sandboxed (gateway-attached) workers
-    # Try task dir first, fallback to root workspace
-    local RESULT_FILE="$HOME/.openclaw/workspace/worker-${WORKER_ID}-${TASK_ID}/RESULT.txt"
+    # Use isolated worker workspace (outside .openclaw/)
+    local WORKSPACE="${WORKER_WORKSPACE:-$HOME/Documents/discord-workers}"
+    local RESULT_FILE="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}/RESULT.txt"
+    # Fallback to openclaw workspace if needed
     [[ ! -f "$RESULT_FILE" ]] && RESULT_FILE="$HOME/.openclaw/workspace/RESULT.txt"
     local RESULT=""
     [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
@@ -311,7 +316,7 @@ post_result() {
     echo "${TASK_ID}|${WORKER_ID}|${STATUS}|$(date +%s)|${MODEL}|${THINKING}|${TOKENS_IN}|${TOKENS_OUT}|${RESULT:0:300}" >> /tmp/discord-tasks/results.txt
     
     # Build debug info with task details
-    local WORKSPACE_DIR="$HOME/.openclaw/workspace/worker-${WORKER_ID}-${TASK_ID}"
+    local WORKSPACE_DIR="${WORKSPACE}/worker-${WORKER_ID}-${TASK_ID}"
     local DEBUG_INFO=""
     
     # List modified files in workspace
