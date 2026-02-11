@@ -622,6 +622,7 @@ while [[ $IDLE_TIME -lt $MAX_IDLE_TIME ]]; do
         if [[ -n "$COMPLETED_MSG_ID" ]]; then
             mkdir -p "$(dirname "$COMPLETED_MESSAGES_FILE")" 2>/dev/null || true
             echo "$COMPLETED_MSG_ID" >> "$COMPLETED_MESSAGES_FILE"
+            sync "$COMPLETED_MESSAGES_FILE" 2>/dev/null || true  # Ensure write persists before exit
             echo "[$(date '+%H:%M:%S')] Cached completed task: ${COMPLETED_MSG_ID:0:12}..."
         fi
         
