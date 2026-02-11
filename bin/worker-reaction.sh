@@ -509,9 +509,9 @@ post_result() {
     local RESULT=""
     [[ -f "$RESULT_FILE" ]] && RESULT=$(cat "$RESULT_FILE" 2>/dev/null)
     
-    # Calculate cost if we have token data and can read pricing from config
-    local COST="N/A"
-    if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
+    # Use COST from execute_task (already calculated and exported)
+    # Fall back to local calculation if not set
+    if [[ "${COST:-N/A}" == "N/A" && "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
         local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
         if [[ -f "$CONFIG_FILE" ]]; then
             # Strip 'openrouter/' prefix if present (config stores model IDs without prefix)
@@ -526,6 +526,8 @@ post_result() {
             fi
         fi
     fi
+    # Ensure COST is set for logging
+    COST="${COST:-N/A}"
     
     # Local log with full details
     mkdir -p "${RUNTIME_DIR}" 2>/dev/null || true
