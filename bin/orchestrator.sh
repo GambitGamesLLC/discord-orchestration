@@ -184,8 +184,19 @@ EOF
     
     # Spawn agent in background (EXACT command from old workers)
     (
+        # Export all needed variables for result posting
         export OPENCLAW_MODEL="$MODEL_FLAG"
         export OPENCLAW_STATE_DIR="$WORKER_STATE_DIR"
+        export BOT_TOKEN="${BOT_TOKEN}"
+        export RESULTS_CHANNEL="${RESULTS_CHANNEL}"
+        export WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL}"
+        export TASK_ID="${TASK_ID}"
+        export AGENT_ID="${AGENT_ID}"
+        export MODEL_FLAG="${MODEL_FLAG}"
+        export THINKING="${THINKING}"
+        export TASK_DESC="${TASK_DESC}"
+        export TASK_DIR="${TASK_DIR}"
+        export WORKER_STATE_DIR="${WORKER_STATE_DIR}"
         
         cd "$TASK_DIR"
         
