@@ -196,10 +196,77 @@ EOF
             --thinking "${THINKING}" \
             > agent-output.log 2>&1 || true
         
+        # Extract tokens from session file
+        local TOKENS_IN="unknown"
+        local TOKENS_OUT="unknown"
+        local COST="N/A"
+        
+        local SESSION_FILE="${HOME}/.openclaw/agents/main/sessions/${AGENT_ID}-${TASK_ID}.jsonl"
+        if [[ -f "$SESSION_FILE" ]]; then
+            local TOKENS_JSON
+            TOKENS_JSON=$(tail -20 "$SESSION_FILE" 2>/dev/null | python3 -c "
+import json,sys
+usage = None
+for line in sys.stdin:
+    try:
+        data = json.loads(line)
+        if data.get('type') == 'message' and data.get('message',{}).get('role') == 'assistant':
+            msg = data['message']
+            if 'usage' in msg:
+                usage = msg['usage']
+    except:
+        pass
+if usage:
+    print(json.dumps(usage))
+" 2>/dev/null) || true
+            
+            if [[ -n "$TOKENS_JSON" ]]; then
+                TOKENS_IN=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('input', 'unknown'))" 2>/dev/null || echo "unknown")
+                TOKENS_OUT=$(echo "$TOKENS_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('output', 'unknown'))" 2>/dev/null || echo "unknown")
+                
+                # Calculate cost
+                if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
+                    local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
+                    if [[ -f "$CONFIG_FILE" ]]; then
+                        local MODEL_ID="${MODEL_FLAG#openrouter/}"
+                        local INPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.input' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                        local OUTPUT_COST=$(jq -r --arg model "$MODEL_ID" '.models.providers.openrouter.models[] | select(.id == $model) | .cost.output' "$CONFIG_FILE" 2>/dev/null || echo "0")
+                        
+                        if [[ "$INPUT_COST" != "null" && "$OUTPUT_COST" != "null" && "$INPUT_COST" != "" ]]; then
+                            COST=$(echo "scale=6; ($TOKENS_IN * $INPUT_COST + $TOKENS_OUT * $OUTPUT_COST) / 1000" | bc 2>/dev/null || echo "N/A")
+                        fi
+                    fi
+                fi
+            fi
+        fi
+        
         # Check for result
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
-            local MSG="✅ **SUCCESS** \`${TASK_ID}\` by **${AGENT_ID}**\\n\\n**Result:**\\n\`\`\`${RESULT:0:1500}\`\`\`"
+            
+            # List files in workspace
+            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
+            
+            # Build nicely formatted message (like old system)
+            local MSG="═══════════════════════════════════════
+
+**[SUCCESS]** \`${TASK_ID}\` by **${AGENT_ID}**
+**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${COST}
+
+**Task Prompt:**
+\`\`\`
+${TASK_DESC:0:500}
+${TASK_DESC:500:+... (truncated)}
+\`\`\`
+
+**Result:**
+\`\`\`
+${RESULT:0:800}
+\`\`\`
+**Files:** ${FILES}
+
+📁 **Workspace:** \`${TASK_DIR}\`"
+            
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"${MSG}\"}" > /dev/null 2>&1 || true
         else
             discord_api POST "/channels/${RESULTS_CHANNEL}/messages" \
