@@ -251,53 +251,40 @@ if usage:
             fi
         fi
         
-        # Function to post to Discord (defined in subshell since functions aren't inherited)
-        post_discord() {
-            local CHANNEL="$1"
-            local DATA="$2"
-            curl -s -X POST \
-                -H "Authorization: Bot ${BOT_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d "$DATA" \
-                "https://discord.com/api/v10/channels/${CHANNEL}/messages" > /dev/null 2>&1 || true
-        }
-        
-        # Check for result
+        # Check for result and post to Discord
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
             
             # List files in workspace
             local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
             
-            # Build nicely formatted message (like old system)
-            local MSG="═══════════════════════════════════════
-
-**[SUCCESS]** \`${TASK_ID}\` by **${AGENT_ID}**
-**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${COST}
-
-**Task Prompt:**
-\`\`\`
-${TASK_DESC:0:500}
-${TASK_DESC:500:+... (truncated)}
-\`\`\`
-
-**Result:**
-\`\`\`
-${RESULT:0:800}
-\`\`\`
-**Files:** ${FILES}
-
-📁 **Workspace:** \`${TASK_DIR}\`"
+            # Build Discord message
+            local MSG="✅ SUCCESS ${TASK_ID:0:16}... by ${AGENT_ID} | Model: ${MODEL_FLAG} | Tokens: ${TOKENS_IN}/${TOKENS_OUT} | Cost: $${COST} | Result: ${RESULT:0:100}"
             
-            post_discord "${RESULTS_CHANNEL}" "{\"content\":\"${MSG}\"}"
+            # Post to Discord
+            curl -s -X POST \
+                -H "Authorization: Bot ${BOT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{\"content\":\"${MSG}\"}" \
+                "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || echo "Failed to post result" >> agent-output.log
         else
-            post_discord "${RESULTS_CHANNEL}" "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result produced\"}"
+            # Post failure
+            curl -s -X POST \
+                -H "Authorization: Bot ${BOT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "{\"content\":\"❌ FAILED ${TASK_ID:0:16}... - No result produced\"}" \
+                "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || true
         fi
         
         # Cleanup
         rm -rf "$WORKER_STATE_DIR"
         
-        post_discord "${WORKER_POOL_CHANNEL}" "{\"content\":\"✅ Agent \`${AGENT_ID}\` finished\"}"
+        # Post completion notice
+        curl -s -X POST \
+            -H "Authorization: Bot ${BOT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":\"✅ Agent ${AGENT_ID} finished\"}" \
+            "https://discord.com/api/v10/channels/${WORKER_POOL_CHANNEL}/messages" > /dev/null 2>&1 || true
     ) &
     
     echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} spawned (PID: $!)"
