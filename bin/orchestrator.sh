@@ -499,12 +499,12 @@ while IFS='|' read -r TASK_ID TASK_CONTENT; do
     
     spawn_agent "$TASK_ID" "$MODEL" "$THINKING" "$DESC" "$WORKER"
     
-    # Track the PID for waiting later
-    local AGENT_PID=$!
+    # Track the PID for waiting later (no 'local' in main body)
+    AGENT_PID=$!
     AGENT_PIDS="$AGENT_PIDS $AGENT_PID"
     
     # Calculate timeout for this agent (default 120s + 5s buffer)
-    local AGENT_WAIT_TIME=125  # 120s default + 5s buffer
+    AGENT_WAIT_TIME=125  # 120s default + 5s buffer
     if [[ "${THINKING}" == "high" ]]; then
         AGENT_WAIT_TIME=305  # 300s for high thinking + 5s buffer
     fi
