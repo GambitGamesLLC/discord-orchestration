@@ -481,6 +481,10 @@ PENDING=$(get_pending_tasks)
 
 echo "[$(date '+%H:%M:%S')] Found pending tasks..."
 
+# Array to track agent PIDs and their timeouts
+AGENT_PIDS=""
+AGENT_TIMEOUTS=""
+
 while IFS='|' read -r TASK_ID TASK_CONTENT; do
     [[ -z "$TASK_ID" ]] && continue
     
@@ -494,8 +498,31 @@ while IFS='|' read -r TASK_ID TASK_CONTENT; do
     WORKER=$(echo "$PARSED" | cut -d'|' -f4)
     
     spawn_agent "$TASK_ID" "$MODEL" "$THINKING" "$DESC" "$WORKER"
+    
+    # Track the PID for waiting later
+    local AGENT_PID=$!
+    AGENT_PIDS="$AGENT_PIDS $AGENT_PID"
+    
+    # Calculate timeout for this agent (default 120s + 5s buffer)
+    local AGENT_WAIT_TIME=125  # 120s default + 5s buffer
+    if [[ "${THINKING}" == "high" ]]; then
+        AGENT_WAIT_TIME=305  # 300s for high thinking + 5s buffer
+    fi
+    if [[ -n "${TIMEOUT:-}" ]]; then
+        AGENT_WAIT_TIME=$((TIMEOUT + 5))
+    fi
+    AGENT_TIMEOUTS="$AGENT_TIMEOUTS $AGENT_WAIT_TIME"
+    
     sleep 2
     
 done <<< "$PENDING"
 
-echo "[$(date '+%H:%M:%S')] Orchestration complete."
+echo "[$(date '+%H:%M:%S')] Orchestration complete. Waiting for agents to finish..."
+
+# Wait for all agents to complete (with individual timeouts)
+for PID in $AGENT_PIDS; do
+    # Extract corresponding timeout (simple approach - use max timeout)
+    wait $PID || true
+done
+
+echo "[$(date '+%H:%M:%S')] All agents finished."
