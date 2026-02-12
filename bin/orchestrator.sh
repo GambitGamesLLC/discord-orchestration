@@ -153,7 +153,7 @@ spawn_agent() {
             ;;
     esac
     
-    # Write AGENTS.md (EXACT format from old workers)
+    # Write AGENTS.md with SUMMARY.txt instruction
     cat > "${WORKER_STATE_DIR}/AGENTS.md" << EOF
 # ${AGENT_ID}
 
@@ -166,8 +166,24 @@ ${TASK_DESC}
 - Coder: openrouter/qwen/qwen3-coder-next
 - Research: openrouter/google/gemini-3-pro-preview
 
-## Output
-Write result to RESULT.txt
+## Output Files (REQUIRED)
+
+You MUST write TWO files:
+
+1. **RESULT.txt** - Complete detailed result (full output)
+2. **SUMMARY.txt** - Condensed summary (~2000 chars max)
+
+### SUMMARY.txt Guidelines:
+- Maximum ${SUMMARY_MAX_LENGTH:-2000} characters
+- Include key findings and conclusions
+- Can truncate with "... (see RESULT.txt)" if needed
+- Used for Discord display (saves tokens)
+- Write AFTER RESULT.txt is complete
+
+### Why Two Files?
+- RESULT.txt = Full context for future reference
+- SUMMARY.txt = Quick review without loading full context
+- Discord shows SUMMARY.txt (reduces token usage)
 EOF
     
     # Copy TOOLS.md if it exists (like old workers)
@@ -275,9 +291,11 @@ if usage:
             echo "$content"
         }
         
-        # Generate SUMMARY.txt after RESULT.txt
-        if [[ -f "RESULT.txt" ]] && [[ -s "RESULT.txt" ]]; then
-            # Use exported SUMMARY_MAX_LENGTH (don't redeclare as local)
+        # FALLBACK: Generate SUMMARY.txt only if worker didn't create it
+        # Workers SHOULD write their own SUMMARY.txt per AGENTS.md instructions
+        # This fallback exists for backward compatibility
+        if [[ -f "RESULT.txt" ]] && [[ -s "RESULT.txt" ]] && [[ ! -f "SUMMARY.txt" ]]; then
+            echo "[$(date '+%H:%M:%S')] WARNING: Worker did not create SUMMARY.txt, generating fallback" >> agent-output.log
             local RESULT_CONTENT=$(cat RESULT.txt 2>/dev/null)
             local TRUNCATION_SUFFIX="... (truncated, see RESULT.txt)"
             local SUFFIX_LENGTH=${#TRUNCATION_SUFFIX}

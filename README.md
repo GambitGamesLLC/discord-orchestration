@@ -66,10 +66,12 @@ The system automatically generates two output files:
 | **SUMMARY.txt** | Condensed version (~2000 chars max) | For quick review, reduces context bloat |
 
 **How it works:**
-1. Agent writes full result to `RESULT.txt`
-2. Orchestrator automatically creates `SUMMARY.txt` with truncated content
-3. Discord posts show the summary (saves tokens when you read them)
-4. Full result available in the workspace if needed
+1. Worker writes full result to `RESULT.txt`
+2. Worker writes condensed summary to `SUMMARY.txt` (~2000 chars max)
+3. Orchestrator posts `SUMMARY.txt` to Discord (no file reading needed!)
+4. Full result in `RESULT.txt` available if needed
+
+**Key benefit:** The worker creates the summary (already has context), keeping the orchestrator lean.
 
 **Benefits:**
 - Reduces token usage when reviewing results
@@ -304,17 +306,26 @@ with code blocks containing backticks.
 
 ### Understanding SUMMARY.txt
 
-When an agent completes a task, the system creates:
+When a worker completes a task, it writes TWO files:
 
-1. **RESULT.txt** - Full output (complete agent response)
-2. **SUMMARY.txt** - Condensed output (~2000 characters max)
+| File | Created By | Content | Purpose |
+|------|------------|---------|---------|
+| **RESULT.txt** | Worker | Full detailed output | Complete reference |
+| **SUMMARY.txt** | Worker | Condensed (~2000 chars max) | Quick review, Discord display |
 
-**Discord shows the SUMMARY.txt** in the results channel, which:
+**Why the worker creates both:**
+- Worker already has full context from doing the work
+- No additional context loading needed to create summary
+- Orchestrator stays lean (no file reading for summary generation)
+
+**Discord shows SUMMARY.txt**, which:
 - Loads faster in Discord
 - Uses fewer tokens when you read it
 - Contains the key information
 
 **To see the full result:** Check the workspace path shown in the Discord message.
+
+**Fallback behavior:** If a worker doesn't create SUMMARY.txt (old workers), the orchestrator will generate one as a backup.
 
 **To adjust summary length:** Set the `SUMMARY_MAX_LENGTH` environment variable:
 ```bash
