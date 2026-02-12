@@ -259,7 +259,8 @@ if usage:
             local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
             
             # Build Discord message
-            local MSG="✅ SUCCESS ${TASK_ID:0:16}... by ${AGENT_ID} | Model: ${MODEL_FLAG} | Tokens: ${TOKENS_IN}/${TOKENS_OUT} | Cost: $${COST} | Result: ${RESULT:0:100}"
+            local DISPLAY_COST="${COST:-N/A}"
+            local MSG="✅ SUCCESS ${TASK_ID:0:16}... by ${AGENT_ID} | Model: ${MODEL_FLAG} | Tokens: ${TOKENS_IN}/${TOKENS_OUT} | Cost: ${DISPLAY_COST} | Result: ${RESULT:0:100}"
             
             # Post to Discord
             curl -s -X POST \
