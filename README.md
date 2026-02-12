@@ -184,7 +184,7 @@ Edit `discord-config.env`:
 
 ```bash
 # Bot Tokens
-CHIP_TOKEN="your-main-bot-token"
+ORCHESTRATOR_AGENT_TOKEN="your-main-bot-token"
 WORKER1_TOKEN="your-worker-bot-token-1"
 WORKER2_TOKEN="your-worker-bot-token-2"
 WORKER3_TOKEN="your-worker-bot-token-3"
@@ -254,8 +254,8 @@ Cost formula: `(input_tokens × input_cost + output_tokens × output_cost) / 100
 
 ## Credits
 
-Created by the Orchestration-Agent team. Based on OpenClaw's agent system.
+Created by Derrick with his OpenClaw buddy Chip. Based on OpenClaw's agent system.
 
 ## License
 
-Same as parent project (OpenClaw).
+MIT
