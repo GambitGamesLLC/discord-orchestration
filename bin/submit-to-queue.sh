@@ -47,7 +47,7 @@ if [[ -n "${ORCHESTRATOR_AGENT_TOKEN:-}" && -n "${TASK_QUEUE_CHANNEL:-}" ]]; the
         [[ -n "$THINKING" ]] && MSG_WITH_ID="${MSG_WITH_ID} [thinking:${THINKING}]"
         
         curl -s -X PATCH \
-            -H "Authorization: Bot ${CHIP_TOKEN}" \
+            -H "Authorization: Bot ${ORCHESTRATOR_AGENT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{\"content\":\"${MSG_WITH_ID}\"}" \
             "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${TASK_ID}" > /dev/null 2>&1
