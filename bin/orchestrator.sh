@@ -252,6 +252,9 @@ if usage:
         fi
         
         # Check for result and post to Discord
+        # Common retry settings for both success and failure
+        local MAX_RETRIES=5
+        
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
             
@@ -268,7 +271,6 @@ if usage:
             
             # Post to Discord with retry logic (exponential backoff)
             local RETRY_COUNT=0
-            local MAX_RETRIES=5
             local POST_SUCCESS=0
             
             while [[ $RETRY_COUNT -lt $MAX_RETRIES ]] && [[ $POST_SUCCESS -eq 0 ]]; do
