@@ -2,6 +2,32 @@
 
 A production-ready multi-agent orchestration system using Discord as the message bus. Spawns fresh OpenClaw agents on-demand for each task, eliminating race conditions and zombie processes.
 
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Features](#features)
+3. [Getting Started (Step-by-Step)](#getting-started-step-by-step)
+   - [Step 1: Create a Discord Server](#step-1-create-a-discord-server)
+   - [Step 2: Create a Discord Bot](#step-2-create-a-discord-bot)
+   - [Step 3: Get Your Bot Token](#step-3-get-your-bot-token)
+   - [Step 4: Invite Bot to Your Server](#step-4-invite-bot-to-your-server)
+   - [Step 5: Create Discord Channels](#step-5-create-discord-channels)
+   - [Step 6: Get Channel IDs](#step-6-get-channel-ids)
+   - [Step 7: Get Server (Guild) ID](#step-7-get-server-guild-id)
+   - [Step 8: Configure OpenClaw](#step-8-configure-openclaw)
+   - [Step 9: Configure Discord Orchestration](#step-9-configure-discord-orchestration)
+   - [Step 10: Install Discord Sanitize Skill](#step-10-install-discord-sanitize-skill)
+4. [Using the System](#using-the-system)
+   - [Submitting Tasks](#submitting-tasks)
+   - [Understanding SUMMARY.txt](#understanding-summarytxt)
+   - [Discord Markdown Sanitization](#discord-markdown-sanitization)
+5. [Architecture](#architecture)
+6. [Configuration Reference](#configuration-reference)
+7. [Troubleshooting](#troubleshooting)
+8. [Advanced Usage](#advanced-usage)
+
+---
+
 ## Overview
 
 **Architecture:** Dynamic agent spawning (no persistent workers)
@@ -20,103 +46,218 @@ A production-ready multi-agent orchestration system using Discord as the message
 | **No Zombie Processes** | Agents exit after completing work - no idle workers consuming resources |
 | **Full Filesystem Access** | Agents can read/write anywhere on the system for real work |
 | **Parallel Execution** | Multiple agents run simultaneously - no coordination overhead |
-| **Automatic Retries** | Exponential backoff (2s→4s→8s→16s→32s) handles transient Discord API failures |
+| **Automatic Retries** | exponential backoff (2s→4s→8s→16s→32s) handles transient Discord API failures |
 | **Cost Tracking** | Every result shows token usage and calculated cost |
 | **Isolated Debugging** | Each agent has its own workspace and logs |
+| **SUMMARY.txt** | Condensed output for reduced context loading |
+| **Auto-Sanitization** | Discord markdown automatically fixed to prevent formatting issues |
 
-## Quick Start
+---
 
-### 1. Configure OpenClaw
+## Features
 
-Copy the example config and add your API keys:
+### SUMMARY.txt - Smart Output Truncation
 
+The system automatically generates two output files:
+
+| File | Purpose | When to Use |
+|------|---------|-------------|
+| **RESULT.txt** | Full detailed output from the agent | When you need complete information |
+| **SUMMARY.txt** | Condensed version (~2000 chars max) | For quick review, reduces context bloat |
+
+**How it works:**
+1. Agent writes full result to `RESULT.txt`
+2. Orchestrator automatically creates `SUMMARY.txt` with truncated content
+3. Discord posts show the summary (saves tokens when you read them)
+4. Full result available in the workspace if needed
+
+**Benefits:**
+- Reduces token usage when reviewing results
+- Fits Discord's message limits automatically
+- Falls back to full result if summary isn't available
+
+### Discord Markdown Sanitization
+
+Discord has issues with code blocks containing backticks. The system automatically:
+
+1. **Replaces triple backticks** (```) with **tildes** (~~~) in code blocks
+2. **Prevents formatting breakage** when agents output bash scripts or markdown
+3. **Works automatically** - no action needed from agents or users
+
+**Example:**
 ```bash
-cp openclaw-example.json ~/.openclaw/openclaw.json
-# Edit ~/.openclaw/openclaw.json and add:
-# - Your OpenRouter API key
-# - Your Discord bot token
-# - Any other API keys you need
+# Original agent output (would break Discord):
+echo "```"
+
+# Sanitized automatically (renders correctly):
+echo "~~~"
 ```
 
-See [openclaw-example.json](openclaw-example.json) for the full configuration structure with multiple model aliases.
+---
 
-### 2. Configure Discord Channels
+## Getting Started (Step-by-Step)
 
-Copy and edit the Discord config:
+### Step 1: Create a Discord Server
+
+1. Open Discord (web or app)
+2. Click the **+** button on the left sidebar
+3. Select **"Create My Own"**
+4. Choose **"For me and my friends"**
+5. Give your server a name (e.g., "My Agent Cluster")
+6. Click **Create**
+
+### Step 2: Create a Discord Bot
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Click **"New Application"** (top right)
+3. Give it a name (e.g., "AgentOrchestrator")
+4. Click **Create**
+5. On the left sidebar, click **"Bot"**
+6. Click **"Add Bot"** and confirm with **"Yes, do it!"**
+
+### Step 3: Get Your Bot Token
+
+**IMPORTANT:** Treat this like a password - never share it!
+
+1. In the Bot section of your application
+2. Under **TOKEN**, click **"Reset Token"** (or "Copy" if already created)
+3. Click **"Copy"** to copy the token
+4. **Save this somewhere safe** - you'll need it in Step 9
+
+**Token looks like:** `MTQ2NTA4NTUzODc3OTI3MTM1Mw.GB1O6Y.xxxxxx`
+
+### Step 4: Invite Bot to Your Server
+
+1. In your Discord application, click **"OAuth2"** → **"URL Generator"**
+2. Under **SCOPES**, check **"bot"**
+3. Under **BOT PERMISSIONS**, check:
+   - **Send Messages**
+   - **Send Messages in Threads**
+   - **Create Public Threads**
+   - **Embed Links**
+   - **Attach Files**
+   - **Read Message History**
+   - **Add Reactions**
+   - **Use Slash Commands**
+4. Copy the generated URL at the bottom
+5. Paste the URL in a new browser tab
+6. Select your server from the dropdown
+7. Click **Continue** → **Authorize**
+8. Complete the CAPTCHA
+
+**Your bot is now in your server!**
+
+### Step 5: Create Discord Channels
+
+In your Discord server, create three text channels:
+
+1. **#task-queue** - Where you submit tasks
+2. **#results** - Where completed work appears
+3. **#worker-pool** - Status updates from agents
+
+**To create a channel:**
+1. Right-click your server name
+2. Select **"Create Channel"**
+3. Choose **"Text"**
+4. Enter the channel name
+5. Click **Create Channel**
+
+### Step 6: Get Channel IDs
+
+**Enable Developer Mode first:**
+1. Go to Discord Settings (gear icon)
+2. Click **"Advanced"**
+3. Toggle **"Developer Mode"** ON
+
+**Get Channel IDs:**
+1. Right-click each channel you created
+2. Click **"Copy Channel ID"**
+3. Save these IDs - you'll need them in Step 9
+
+**Channel IDs look like:** `1470493473038663792`
+
+### Step 7: Get Server (Guild) ID
+
+1. Right-click your server name
+2. Click **"Copy Server ID"**
+3. Save this ID - you'll need it in Step 9
+
+**Server ID looks like:** `1470491656913686786`
+
+### Step 8: Configure OpenClaw
+
+1. Copy the example config:
+   ```bash
+   cp openclaw-example.json ~/.openclaw/openclaw.json
+   ```
+
+2. Edit `~/.openclaw/openclaw.json`:
+   ```bash
+   nano ~/.openclaw/openclaw.json
+   ```
+
+3. Add your OpenRouter API key:
+   ```json
+   "env": {
+     "OPENROUTER_API_KEY": "sk-or-v1-YOUR-KEY-HERE"
+   }
+   ```
+
+4. Add your Discord bot token to the channels section:
+   ```json
+   "channels": {
+     "discord": {
+       "enabled": true,
+       "token": "YOUR-BOT-TOKEN-FROM-STEP-3",
+       "allowBots": true
+     }
+   }
+   ```
+
+5. Save and exit (Ctrl+X, then Y, then Enter)
+
+### Step 9: Configure Discord Orchestration
+
+1. Copy the example config:
+   ```bash
+   cp discord-config.env.example discord-config.env
+   ```
+
+2. Edit `discord-config.env`:
+   ```bash
+   nano discord-config.env
+   ```
+
+3. Fill in your values from previous steps:
+   ```bash
+   # Bot Token (from Step 3)
+   ORCHESTRATOR_AGENT_TOKEN="YOUR-BOT-TOKEN-HERE"
+   
+   # Channel IDs (from Step 6)
+   TASK_QUEUE_CHANNEL="1470493473038663792"
+   RESULTS_CHANNEL="1470494384016462107"
+   WORKER_POOL_CHANNEL="1470493843496501502"
+   
+   # Server ID (from Step 7)
+   GUILD_ID="1470491656913686786"
+   ```
+
+4. Save and exit
+
+### Step 10: Install Discord Sanitize Skill
+
+To prevent Discord markdown formatting issues:
 
 ```bash
-cp discord-config.env.example discord-config.env
-# Edit discord-config.env with your:
-# - Bot tokens
-# - Channel IDs
-# - Server (Guild) ID
-```
-
-### 3. Submit a Task
-
-```bash
-./bin/submit-to-queue.sh "Your task description here" "cheap" "low"
-```
-
-**Model aliases** (defined in your `openclaw.json`):
-- `cheap` → step-3.5-flash:free (**FREE**)
-- `primary` → kimi-k2..5
-- `coder` → qwen3-coder-next
-- `research` → gemini-3-pro-preview
-
-### 4. Run Orchestrator
-
-```bash
-./bin/orchestrator.sh
-```
-
-This will:
-- Scan #task-queue for unassigned tasks (no ✅ reaction)
-- Claim tasks by adding ✅ reaction
-- Spawn fresh agents for each task
-- Post formatted results to #results
-- Clean up agent workspaces when done
-
-### 5. Set Up Automation (Optional)
-
-**Cron (run every minute):**
-```bash
-*/1 * * * * cd /path/to/discord-orchestration && ./bin/orchestrator.sh >> /tmp/orchestrator.log 2>&1
-```
-
-Or run manually whenever you have tasks queued.
-
-### 6. Custom Timeout (Optional)
-
-By default, agents timeout after:
-- **120 seconds** for `low` or `medium` thinking
-- **300 seconds** (5 minutes) for `high` thinking
-
-You can override this with the `TIMEOUT` environment variable:
-
-```bash
-# 10 minute timeout for all tasks
-TIMEOUT=600 ./bin/orchestrator.sh
-
-# 1 hour for extremely complex tasks
-TIMEOUT=3600 ./bin/orchestrator.sh
-```
-
-**Note:** The timeout is per-agent. If you have 5 tasks, each agent gets the full timeout.
-
-### 7. Install Discord Sanitize Skill (Recommended)
-
-To prevent Discord markdown formatting issues (especially with code blocks containing backticks), install the included `discord-sanitize` skill:
-
-```bash
-# Symlink the skill (recommended for development)
-ln -s ~/Documents/GitHub/discord-orchestration/skills/discord-sanitize ~/.openclaw/skills/discord-sanitize
+# Symlink the skill (recommended)
+ln -s ~/Documents/GitHub/discord-orchestration/skills/discord-sanitize \
+  ~/.openclaw/skills/discord-sanitize
 
 # Restart OpenClaw
 openclaw gateway restart
 ```
 
-**For Orchestrators:** Add this rule to your `AGENTS.md` to ensure the skill gets used:
+**For Orchestrators:** Add this to your `AGENTS.md`:
 
 ```markdown
 ## Discord Messaging Rule
@@ -128,67 +269,142 @@ This ensures proper markdown sanitization and prevents formatting issues
 with code blocks containing backticks.
 ```
 
-See [skills/discord-sanitize/SKILL.md](skills/discord-sanitize/SKILL.md) for full documentation.
+---
 
-## File Structure
+## Using the System
 
-```
-discord-orchestration/
-├── bin/
-│   ├── orchestrator.sh          # Main orchestrator - spawn agents
-│   ├── submit-to-queue.sh       # Submit tasks to Discord
-│   ├── trigger-orchestrator.sh  # Manual orchestrator trigger
-│   ├── setup-discord.sh         # Initial Discord setup
-│   └── ...
-├── workers/                     # Agent workspaces (auto-created)
-│   └── agent-<timestamp>-<random>/
-│       ├── AGENTS.md           # Task instructions for agent
-│       ├── TOOLS.md            # Environment-specific tools (optional)
-│       └── tasks/
-│           └── <task-id>/
-│               ├── TASK.txt    # Task description
-│               ├── RESULT.txt  # Agent output
-│               └── agent-output.log  # Agent execution log
-├── .runtime/                   # Orchestrator state
-│   └── assigned-tasks.txt     # Tasks claimed by this orchestrator
-├── openclaw-example.json      # Example OpenClaw config (redacted)
-├── discord-config.env         # Your Discord bot tokens & channels
-└── README.md                  # This file
+### Submitting Tasks
+
+```bash
+# Submit a simple task
+./bin/submit-to-queue.sh "Your task description"
+
+# With specific model
+./bin/submit-to-queue.sh "Your task" "primary" "medium"
+
+# With inline tags
+./bin/submit-to-queue.sh "Your task [model:coder] [thinking:high]"
 ```
 
-## How It Works
+**Available models:**
+- `cheap` → step-3.5-flash:free (**FREE**)
+- `primary` → kimi-k2.5 (default)
+- `coder` → qwen3-coder-next
+- `research` → gemini-3-pro-preview
+
+### Running the Orchestrator
+
+```bash
+# Run once
+./bin/orchestrator.sh
+
+# Run continuously (cron)
+*/1 * * * * cd /path/to/discord-orchestration && ./bin/orchestrator.sh >> /tmp/orchestrator.log 2>&1
+```
+
+### Understanding SUMMARY.txt
+
+When an agent completes a task, the system creates:
+
+1. **RESULT.txt** - Full output (complete agent response)
+2. **SUMMARY.txt** - Condensed output (~2000 characters max)
+
+**Discord shows the SUMMARY.txt** in the results channel, which:
+- Loads faster in Discord
+- Uses fewer tokens when you read it
+- Contains the key information
+
+**To see the full result:** Check the workspace path shown in the Discord message.
+
+**To adjust summary length:** Set the `SUMMARY_MAX_LENGTH` environment variable:
+```bash
+SUMMARY_MAX_LENGTH=500 ./bin/orchestrator.sh  # Shorter summaries
+SUMMARY_MAX_LENGTH=4000 ./bin/orchestrator.sh # Longer summaries
+```
+
+### Discord Markdown Sanitization
+
+The system automatically sanitizes Discord messages to prevent formatting issues.
+
+**What gets sanitized:**
+- Triple backticks (```) → Tildes (~~~)
+- Excessive newlines collapsed
+- Other Discord markdown quirks
+
+**Where it happens:**
+- Automatically in orchestrator when posting results
+- Automatically when using `discord-safe-send` tool
+- Workers don't need to worry about it
+
+**Why it matters:**
+Without sanitization, code blocks containing backticks would break Discord's formatting:
+
+```bash
+# Bad - breaks Discord formatting
+echo "```"
+
+# Good - renders correctly
+echo "~~~"
+```
+
+---
+
+## Architecture
 
 ### Task Flow
 
 ```
-User submits task via submit-to-queue.sh
-         ↓
-Task appears in Discord #task-queue
-         ↓
-Orchestrator detects unassigned task
-         ↓
-Orchestrator adds ✅ reaction (atomic claim)
-         ↓
-Orchestrator spawns fresh agent process
-         ↓
-Agent writes AGENTS.md + TASK.txt in isolated workspace
-         ↓
-Agent executes via OpenClaw Gateway (full filesystem access)
-         ↓
-Agent writes RESULT.txt
-         ↓
-Orchestrator reads RESULT.txt
-         ↓
-Orchestrator posts formatted result to #results (with retry logic)
-         ↓
-Orchestrator cleans up workspace
-         ↓
-Agent process exits cleanly
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│   You       │────▶│  #task-queue │────▶│  Orchestrator   │
+│  Submit     │     │   (Discord)  │     │  Claims Task    │
+└─────────────┘     └──────────────┘     └────────┬────────┘
+                                                   │
+                                                   ▼
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│   Agent     │◀───│  Workspace   │◀────│  Spawns Agent   │
+│  Writes     │     │  (isolated)  │     │  (fresh)        │
+│  RESULT.txt │     └──────────────┘     └─────────────────┘
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│ Orchestrator│────▶│  #results    │────▶│   You Read      │
+│ Posts       │     │   (Discord)  │     │   Summary       │
+│ SUMMARY.txt │     └──────────────┘     └─────────────────┘
+└─────────────┘
+```
+
+### File Structure
+
+```
+discord-orchestration/
+├── bin/
+│   ├── orchestrator.sh          # Main orchestrator
+│   ├── submit-to-queue.sh       # Submit tasks to Discord
+│   ├── setup-discord.sh         # Initial Discord setup helper
+│   └── ...
+├── skills/
+│   └── discord-sanitize/        # Discord sanitization skill
+│       ├── SKILL.md
+│       └── bin/discord-safe-send
+├── workers/                     # Agent workspaces (auto-created)
+│   └── agent-<timestamp>-<random>/
+│       ├── AGENTS.md
+│       ├── TOOLS.md
+│       └── tasks/
+│           └── <task-id>/
+│               ├── TASK.txt
+│               ├── RESULT.txt      # Full output
+│               └── SUMMARY.txt     # Condensed output
+├── .runtime/                    # Orchestrator state
+├── openclaw-example.json        # Example OpenClaw config
+├── discord-config.env           # Your Discord tokens & IDs
+└── README.md                    # This file
 ```
 
 ### Retry Logic
 
-When posting to Discord, transient failures (401, 429, 5xx) are handled automatically:
+When posting to Discord, transient failures are handled automatically:
 
 | Attempt | Delay | Total Wait |
 |---------|-------|------------|
@@ -198,78 +414,94 @@ When posting to Discord, transient failures (401, 429, 5xx) are handled automati
 | 4 | 16s | 30s |
 | 5 | 32s | 62s |
 
-After 5 failures, the agent logs the error but continues cleanup.
+After 5 failures, the error is logged and the agent continues.
 
-## Discord Channels
+---
 
-| Channel | Purpose |
-|---------|---------|
-| #task-queue | Submit tasks here. Orchestrator claims tasks with ✅ reaction. |
-| #results | Agent outputs posted here with full details (model, tokens, cost). |
-| #worker-pool | Agent spawn/finish notices for monitoring. |
+## Configuration Reference
 
-## Configuration
+### Environment Variables
 
-### OpenClaw Models
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUMMARY_MAX_LENGTH` | 2000 | Maximum characters for SUMMARY.txt |
+| `TIMEOUT` | 120 (low/med), 300 (high) | Agent execution timeout in seconds |
 
-See [openclaw-example.json](openclaw-example.json) for a complete example with:
-- 4 model configurations (cheap, primary, coder, research)
-- Cost tracking per 1K tokens
-- Model aliases mapping
-
-**Key sections:**
-- `env.OPENROUTER_API_KEY` - Your OpenRouter API key
-- `models.providers.openrouter.models` - Model definitions with pricing
-- `agents.defaults.models` - Alias mappings (cheap, primary, coder, research)
-
-### Discord Config
-
-Edit `discord-config.env`:
+### Discord Config (discord-config.env)
 
 ```bash
-# Bot Tokens
-ORCHESTRATOR_AGENT_TOKEN="your-main-bot-token"
-WORKER1_TOKEN="your-worker-bot-token-1"
-WORKER2_TOKEN="your-worker-bot-token-2"
-WORKER3_TOKEN="your-worker-bot-token-3"
-
-# Channel IDs
-TASK_QUEUE_CHANNEL="1470493473038663792"
-RESULTS_CHANNEL="1470494384016462107"
-WORKER_POOL_CHANNEL="1470493843496501502"
-
-# Server ID
-GUILD_ID="1470491656913686786"
+# Required
+ORCHESTRATOR_AGENT_TOKEN="your-bot-token"
+TASK_QUEUE_CHANNEL="channel-id"
+RESULTS_CHANNEL="channel-id"
+WORKER_POOL_CHANNEL="channel-id"
+GUILD_ID="server-id"
 ```
+
+### OpenClaw Config (~/.openclaw/openclaw.json)
+
+```json
+{
+  "env": {
+    "OPENROUTER_API_KEY": "your-key"
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "your-bot-token",
+      "allowBots": true
+    }
+  }
+}
+```
+
+---
 
 ## Troubleshooting
 
-### Orchestrator not finding tasks
+### "Bot token invalid" errors
+- Check you copied the token correctly (Step 3)
+- Ensure token is in both `~/.openclaw/openclaw.json` and `discord-config.env`
+- Reset the token in Discord Developer Portal if needed
+
+### "Cannot find channel" errors
+- Verify channel IDs are correct (Step 6)
+- Ensure the bot is in your server (Step 4)
+- Check bot has permissions to read/write in those channels
+
+### "Orchestrator not finding tasks"
 - Check #task-queue has unassigned tasks (no ✅ reaction)
 - Verify `discord-config.env` has correct channel IDs
 - Check that your bot has "Add Reactions" permission
 
-### Agents failing with "No result"
+### "Agents failing with No result"
 - Check Gateway is running: `openclaw gateway status`
 - Check agent logs in `workers/agent-*/tasks/*/agent-output.log`
 - Verify your OpenRouter API key is valid
 
+### Discord formatting looks broken
+- Check that `discord-sanitize` skill is installed (Step 10)
+- Ensure you're using `discord-safe-send` instead of `message` tool
+- Check agent logs to see if sanitization is happening
+
 ### Retry messages in logs
-Normal! The system automatically retries Discord API failures. Check `workers/agent-*/tasks/*/agent-output.log` for:
+Normal! The system automatically retries Discord API failures. Check logs:
 ```
-[HH:MM:SS] Discord post failed (HTTP 401), retry 1/5 in 2s...
+[HH:MM:SS] Discord post failed (HTTP 429), retry 1/5 in 2s...
 ```
 
 ### Too many agents spawning
-- Orchestrator marks tasks with ✅ to prevent duplicate claims
+- Orchestrator marks tasks with ✅ to prevent duplicates
 - Check `.runtime/assigned-tasks.txt` for claimed task IDs
-- Clear this file if you need to reclaim tasks (not recommended in production)
+- Clear this file to reclaim tasks (not recommended in production)
+
+---
 
 ## Advanced Usage
 
 ### Parallel Execution
 
-The orchestrator naturally handles parallel execution. Just submit multiple tasks:
+Submit multiple tasks at once:
 
 ```bash
 ./bin/submit-to-queue.sh "Task 1" "cheap" "low" &
@@ -281,20 +513,26 @@ wait
 
 ### Long-Running Tasks
 
-For tasks that may take >2 minutes, increase the timeout in `orchestrator.sh`:
+Override the default timeout:
 
 ```bash
-timeout 300 openclaw agent ...  # 5 minutes instead of 2
+# 10 minute timeout
+TIMEOUT=600 ./bin/orchestrator.sh
+
+# 1 hour timeout
+TIMEOUT=3600 ./bin/orchestrator.sh
 ```
 
 ### Cost Tracking
 
 Every result shows:
 - **Tokens:** Input / Output count
-- **Cost:** Calculated from your `openclaw.json` pricing
+- **Cost:** Calculated from `openclaw.json` pricing
 - **Model:** Which model was actually used
 
-Cost formula: `(input_tokens × input_cost + output_tokens × output_cost) / 1000`
+**Formula:** `(input_tokens × input_cost + output_tokens × output_cost) / 1000`
+
+---
 
 ## Credits
 
