@@ -38,3 +38,4 @@ worker-worker-*/
 
 # Worker runtime output directory (auto-created on first run)
 workers/
+tests/bin/.mock-*
