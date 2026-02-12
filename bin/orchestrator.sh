@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# Check for jq dependency
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required but not installed. Install with: sudo apt-get install jq (Debian/Ubuntu) or brew install jq (macOS)" >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
