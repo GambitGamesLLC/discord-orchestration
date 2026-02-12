@@ -107,11 +107,17 @@ parse_task() {
         THINKING="${BASH_REMATCH[1]}"
     fi
     
+    # Parse worker type tag [worker:godot-tester]
+    local WORKER_TYPE=""
+    if [[ "$CONTENT" =~ \[worker:([^\]]+)\] ]]; then
+        WORKER_TYPE="${BASH_REMATCH[1]}"
+    fi
+    
     local DESC="$CONTENT"
-    DESC=$(echo "$DESC" | sed 's/\[model:[^]]*\]//g; s/\[thinking:[^]]*\]//g; s/\*\*//g')
+    DESC=$(echo "$DESC" | sed 's/\[model:[^]]*\]//g; s/\[thinking:[^]]*\]//g; s/\[worker:[^]]*\]//g; s/\*\*//g')
     DESC=$(echo "$DESC" | sed 's/^ *//;s/ *$//')
     
-    echo "$MODEL|$THINKING|$DESC"
+    echo "$MODEL|$THINKING|$DESC|$WORKER_TYPE"
 }
 
 # Spawn agent to execute task
@@ -120,12 +126,14 @@ spawn_agent() {
     local MODEL="$2"
     local THINKING="$3"
     local TASK_DESC="$4"
+    local WORKER_TYPE="${5:-}"
     
     local AGENT_ID="agent-$(date +%s)-${RANDOM}"
     local WORKER_STATE_DIR="${WORKERS_DIR}/${AGENT_ID}"
     local TASK_DIR="${WORKER_STATE_DIR}/tasks/${TASK_ID}"
     
     echo "[$(date '+%H:%M:%S')] Spawning agent for task ${TASK_ID:0:12}..."
+    [[ -n "$WORKER_TYPE" ]] && echo "[$(date '+%H:%M:%S')] Worker type: $WORKER_TYPE"
     
     # Create workspace (exactly like old workers)
     mkdir -p "$TASK_DIR"
@@ -153,8 +161,26 @@ spawn_agent() {
             ;;
     esac
     
-    # Write AGENTS.md with SUMMARY.txt instruction
-    cat > "${WORKER_STATE_DIR}/AGENTS.md" << EOF
+    # Support custom AGENTS.md template via environment variable
+    if [[ -n "${AGENTS_MD_TEMPLATE:-}" && -f "${AGENTS_MD_TEMPLATE}" ]]; then
+        # Use custom template and append task info
+        cp "${AGENTS_MD_TEMPLATE}" "${WORKER_STATE_DIR}/AGENTS.md"
+        cat >> "${WORKER_STATE_DIR}/AGENTS.md" << EOF
+
+---
+
+## Current Task Context
+**Task ID:** ${TASK_ID}
+**Agent ID:** ${AGENT_ID}
+**Task Directory:** ${TASK_DIR}
+
+## Task Description
+${TASK_DESC}
+EOF
+        echo "[$(date '+%H:%M:%S')] Using custom AGENTS.md: ${AGENTS_MD_TEMPLATE}" >&2
+    else
+        # Default AGENTS.md
+        cat > "${WORKER_STATE_DIR}/AGENTS.md" << EOF
 # ${AGENT_ID}
 
 ## Task
@@ -185,6 +211,7 @@ You MUST write TWO files:
 - SUMMARY.txt = Quick review without loading full context
 - Discord shows SUMMARY.txt (reduces token usage)
 EOF
+    fi
     
     # Copy TOOLS.md if it exists (like old workers)
     if [[ -f "${WORKERS_DIR}/TOOLS.md" ]]; then
@@ -197,8 +224,10 @@ TASK: ${TASK_DESC}
 EOF
     
     # Post notice (outside subshell so discord_api works)
+    local WORKER_INFO=""
+    [[ -n "$WORKER_TYPE" ]] && WORKER_INFO="\\nWorker: \`${WORKER_TYPE}\`"
     discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
-        "{\"content\":\"🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`\"}" > /dev/null 2>&1 || true
+        "{\"content\":\"🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`${WORKER_INFO}\"}" > /dev/null 2>&1 || true
     
     # Spawn agent in background (EXACT command from old workers)
     (
@@ -229,6 +258,12 @@ EOF
             else
                 AGENT_TIMEOUT=120
             fi
+        fi
+        
+        # Support extra PYTHONPATH for custom modules (e.g., godot_bridge)
+        if [[ -n "${EXTRA_PYTHONPATH:-}" ]]; then
+            export PYTHONPATH="${EXTRA_PYTHONPATH}${PYTHONPATH:+:$PYTHONPATH}"
+            echo "[$(date '+%H:%M:%S')] PYTHONPATH extended: ${PYTHONPATH}" >> agent-output.log
         fi
         
         # Run agent (EXACT command from old workers)
@@ -455,9 +490,10 @@ while IFS='|' read -r TASK_ID TASK_CONTENT; do
     PARSED=$(parse_task "$TASK_CONTENT")
     MODEL=$(echo "$PARSED" | cut -d'|' -f1)
     THINKING=$(echo "$PARSED" | cut -d'|' -f2)
-    DESC=$(echo "$PARSED" | cut -d'|' -f3-)
+    DESC=$(echo "$PARSED" | cut -d'|' -f3)
+    WORKER=$(echo "$PARSED" | cut -d'|' -f4)
     
-    spawn_agent "$TASK_ID" "$MODEL" "$THINKING" "$DESC"
+    spawn_agent "$TASK_ID" "$MODEL" "$THINKING" "$DESC" "$WORKER"
     sleep 2
     
 done <<< "$PENDING"
