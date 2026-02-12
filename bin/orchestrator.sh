@@ -77,13 +77,9 @@ mark_assigned() {
     discord_api PUT "/channels/${TASK_QUEUE_CHANNEL}/messages/${TASK_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
 }
 
-# Check if already assigned
+# Check if already assigned (Discord reaction is atomic - no local file cache)
 is_assigned() {
     local TASK_ID="$1"
-    
-    if [[ -f "$ASSIGNED_FILE" ]] && grep -q "^${TASK_ID}$" "$ASSIGNED_FILE" 2>/dev/null; then
-        return 0
-    fi
     
     local REACTIONS
     REACTIONS=$(discord_api GET "/channels/${TASK_QUEUE_CHANNEL}/messages/${TASK_ID}/reactions/%E2%9C%85")
@@ -91,7 +87,6 @@ is_assigned() {
     COUNT=$(echo "$REACTIONS" | python3 -c "import json,sys; data=json.load(sys.stdin); print(len(data) if isinstance(data, list) else 0)" 2>/dev/null)
     
     if [[ "${COUNT:-0}" -gt 0 ]]; then
-        echo "$TASK_ID" >> "$ASSIGNED_FILE" 2>/dev/null || true
         return 0
     fi
     
