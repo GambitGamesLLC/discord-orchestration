@@ -273,7 +273,6 @@ EOF
         timeout $AGENT_TIMEOUT openclaw agent \
             --session-id "${AGENT_ID}-${TASK_ID}" \
             --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
-            --model "${MODEL_FLAG}" \
             --thinking "${THINKING}" \
             > agent-output.log 2>&1 || true
         
