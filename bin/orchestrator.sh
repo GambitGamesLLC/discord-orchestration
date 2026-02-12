@@ -13,7 +13,7 @@ if [[ -f "${REPO_DIR}/discord-config.env" ]]; then
     source "${REPO_DIR}/discord-config.env"
 fi
 
-BOT_TOKEN="${CHIP_TOKEN:-}"
+BOT_TOKEN="${ORCHESTRATOR_AGENT_TOKEN:-}"
 TASK_QUEUE_CHANNEL="${TASK_QUEUE_CHANNEL:-}"
 RESULTS_CHANNEL="${RESULTS_CHANNEL:-}"
 WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
@@ -200,8 +200,14 @@ EOF
         
         cd "$TASK_DIR"
         
+        # Set timeout based on thinking level (high = 5 min, others = 2 min)
+        local TIMEOUT=120
+        if [[ "${THINKING}" == "high" ]]; then
+            TIMEOUT=300
+        fi
+        
         # Run agent (EXACT command from old workers)
-        timeout 120 openclaw agent \
+        timeout $TIMEOUT openclaw agent \
             --session-id "${AGENT_ID}-${TASK_ID}" \
             --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
             --thinking "${THINKING}" \
