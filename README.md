@@ -1,6 +1,11 @@
 # Discord Orchestration
 
-Distributed multi-agent orchestration using Discord as the message bus. This system allows you to run multiple AI agent workers across different machines, coordinated through Discord channels. It bypasses OpenClaw's buggy `sessions_spawn` by using external worker processes that communicate via Discord.
+> **🎉 NEW:** Dynamic agent spawning system is now the recommended approach!
+> 
+> See [README-DYNAMIC.md](README-DYNAMIC.md) for the new workflow.
+> The old persistent worker system has been archived.
+
+Distributed multi-agent orchestration using Discord as the message bus. This system allows you to run AI agents coordinated through Discord channels, bypassing OpenClaw's buggy `sessions_spawn`.
 
 ## Table of Contents
 
