@@ -1,0 +1,71 @@
+#!/bin/bash
+#
+# discord-safe-send - Sanitize messages before sending to Discord
+# 
+# Usage: discord-safe-send action=send to="#channel" message="content"
+# 
+# This script sanitizes message content to prevent Discord markdown issues,
+# then passes the sanitized content to the actual message tool.
+
+set -euo pipefail
+
+# Parse arguments
+ACTION=""
+TO=""
+MESSAGE=""
+CHANNEL="discord"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        action=*) ACTION="${1#action=}"; shift ;;
+        to=*) TO="${1#to=}"; shift ;;
+        message=*) MESSAGE="${1#message=}"; shift ;;
+        channel=*) CHANNEL="${1#channel=}"; shift ;;
+        *) shift ;;
+    esac
+done
+
+# Validate required params
+if [[ -z "$ACTION" ]]; then
+    echo "Error: action parameter required" >&2
+    exit 1
+fi
+
+if [[ -z "$TO" ]]; then
+    echo "Error: to parameter required" >&2
+    exit 1
+fi
+
+# Sanitize message content if provided
+sanitize_for_discord() {
+    local content="$1"
+    
+    # Replace triple backticks with tildes to prevent code block breaking
+    # This handles: ```bash, ```, etc.
+    content="${content//\`\`\`/~~~}"
+    
+    # Replace more than 3 consecutive backticks with equivalent tildes
+    # 4 backticks -> 4 tildes, 5 backticks -> 5 tildes, etc.
+    content="${content//\`\`\`\`/~~~~}"
+    content="${content//\`\`\`\`\`/~~~~~}"
+    content="${content//\`\`\`\`\`\`/~~~~~~}"
+    
+    # Collapse excessive newlines (more than 2) to just 2
+    # This prevents Discord's "wall of text" issues
+    content=$(echo "$content" | sed ':a;N;$!ba;s/\n\n\n+/\n\n/g')
+    
+    echo "$content"
+}
+
+# Sanitize the message if present
+if [[ -n "$MESSAGE" ]]; then
+    MESSAGE=$(sanitize_for_discord "$MESSAGE")
+fi
+
+# Call the actual message tool with sanitized content
+# Use the message tool from OpenClaw
+if [[ -n "$MESSAGE" ]]; then
+    message action="$ACTION" to="$TO" message="$MESSAGE" channel="$CHANNEL"
+else
+    message action="$ACTION" to="$TO" channel="$CHANNEL"
+fi

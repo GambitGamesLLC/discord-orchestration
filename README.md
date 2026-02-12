@@ -104,6 +104,32 @@ TIMEOUT=3600 ./bin/orchestrator.sh
 
 **Note:** The timeout is per-agent. If you have 5 tasks, each agent gets the full timeout.
 
+### 7. Install Discord Sanitize Skill (Recommended)
+
+To prevent Discord markdown formatting issues (especially with code blocks containing backticks), install the included `discord-sanitize` skill:
+
+```bash
+# Symlink the skill (recommended for development)
+ln -s ~/Documents/GitHub/discord-orchestration/skills/discord-sanitize ~/.openclaw/skills/discord-sanitize
+
+# Restart OpenClaw
+openclaw gateway restart
+```
+
+**For Orchestrators:** Add this rule to your `AGENTS.md` to ensure the skill gets used:
+
+```markdown
+## Discord Messaging Rule
+
+When sending messages to Discord channels, ALWAYS use:
+`discord-safe-send` instead of `message` tool
+
+This ensures proper markdown sanitization and prevents formatting issues 
+with code blocks containing backticks.
+```
+
+See [skills/discord-sanitize/SKILL.md](skills/discord-sanitize/SKILL.md) for full documentation.
+
 ## File Structure
 
 ```
