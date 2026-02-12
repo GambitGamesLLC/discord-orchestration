@@ -72,7 +72,8 @@ for msg in data:
 # Mark task as assigned
 mark_assigned() {
     local TASK_ID="$1"
-    echo "$TASK_ID" >> "$ASSIGNED_FILE"
+    local LOCK_FILE="${ASSIGNED_FILE}.lock"
+    flock "$LOCK_FILE" -c "echo \"$TASK_ID\" >> \"$ASSIGNED_FILE\""
     discord_api PUT "/channels/${TASK_QUEUE_CHANNEL}/messages/${TASK_ID}/reactions/%E2%9C%85/@me" > /dev/null 2>&1 || true
 }
 
