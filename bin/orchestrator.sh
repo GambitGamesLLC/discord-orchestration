@@ -262,60 +262,41 @@ if usage:
             local DISPLAY_COST="${COST:-N/A}"
             local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
             
-            # Build message with proper Discord formatting
-            local MSG="═══════════════════════════════════════
-
-**[SUCCESS]** \`${TASK_ID}\` by **${AGENT_ID}**
-**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${DISPLAY_COST}
-
-**Task Prompt:**
-\`\`\`
-${TASK_DESC:0:500}${TASK_DESC:500:+...}
-\`\`\`
-
-**Result:**
-\`\`\`
-${RESULT:0:800}${RESULT:800:+...}
-\`\`\`
-**Files:** ${FILES}
-
-📁 **Workspace:** \`${TASK_DIR}\`"
+            # Build message - use actual newlines which jq will handle
+            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Result:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
+                "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
+                "${TASK_DESC:0:500}" "${RESULT:0:800}" "$FILES" "$TASK_DIR")
             
-            # Post to Discord
-            curl -s -X POST \
+            # Post to Discord using jq to properly format JSON
+            echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$MSG" '.content = $msg' | \
+                curl -s -X POST \
                 -H "Authorization: Bot ${BOT_TOKEN}" \
                 -H "Content-Type: application/json" \
-                -d "{\"content\":\"${MSG}\"}" \
+                -d @- \
                 "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || echo "Failed to post result" >> agent-output.log
         else
             # Post failure with nice formatting
-            local FAIL_MSG="═══════════════════════════════════════
-
-**[FAILED]** \`${TASK_ID}\` by **${AGENT_ID}**
-**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING}
-
-**Task:**
-\`\`\`
-${TASK_DESC:0:300}${TASK_DESC:300:+...}
-\`\`\`
-
-❌ **No result produced**"
+            local FAIL_MSG=$(printf '═══════════════════════════════════════\n\n**[FAILED]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s\n\n**Task:**\n```\n%s\n```\n\n❌ **No result produced**' \
+                "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "${TASK_DESC:0:300}")
             
-            curl -s -X POST \
+            echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$FAIL_MSG" '.content = $msg' | \
+                curl -s -X POST \
                 -H "Authorization: Bot ${BOT_TOKEN}" \
                 -H "Content-Type: application/json" \
-                -d "{\"content\":\"${FAIL_MSG}\"}" \
+                -d @- \
                 "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || true
         fi
         
         # Cleanup
         rm -rf "$WORKER_STATE_DIR"
         
-        # Post completion notice
-        curl -s -X POST \
+        # Post completion notice (simple format, no jq needed)
+        local DONE_MSG="✅ Agent \`${AGENT_ID}\` finished"
+        echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$DONE_MSG" '.content = $msg' | \
+            curl -s -X POST \
             -H "Authorization: Bot ${BOT_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"content\":\"✅ Agent ${AGENT_ID} finished\"}" \
+            -d @- \
             "https://discord.com/api/v10/channels/${WORKER_POOL_CHANNEL}/messages" > /dev/null 2>&1 || true
     ) &
     
