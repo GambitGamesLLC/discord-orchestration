@@ -23,7 +23,7 @@
 
 ### 2. Run Orchestrator
 ```bash
-./bin/orchestrator-dynamic.sh
+./bin/orchestrator.sh
 ```
 
 This will:
@@ -36,7 +36,7 @@ This will:
 
 **Cron (run every minute):**
 ```bash
-*/1 * * * * cd /path/to/discord-orchestration && ./bin/orchestrator-dynamic.sh >> /tmp/orchestrator.log 2>&1
+*/1 * * * * cd /path/to/discord-orchestration && ./bin/orchestrator.sh >> /tmp/orchestrator.log 2>&1
 ```
 
 ## File Structure
@@ -44,7 +44,7 @@ This will:
 ```
 discord-orchestration/
 ├── bin/
-│   ├── orchestrator-dynamic.sh    # Main orchestrator
+│   ├── orchestrator.sh    # Main orchestrator
 │   ├── submit-to-queue.sh         # Submit tasks
 │   ├── trigger-orchestrator.sh    # Manual trigger
 │   └── ...
