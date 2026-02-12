@@ -267,12 +267,17 @@ if usage:
         fi
         
         # Generate SUMMARY.txt after RESULT.txt
-        if [[ -f "RESULT.txt" ]]; then
-            local SUMMARY_MAX_LENGTH="${SUMMARY_MAX_LENGTH:-2000}"
-            local RESULT=$(cat RESULT.txt 2>/dev/null)
-            local SUMMARY="${RESULT:0:$SUMMARY_MAX_LENGTH}"
-            if [[ ${#RESULT} -gt $SUMMARY_MAX_LENGTH ]]; then
-                SUMMARY="${SUMMARY}... (truncated, see RESULT.txt)"
+        if [[ -f "RESULT.txt" ]] && [[ -s "RESULT.txt" ]]; then
+            # Use exported SUMMARY_MAX_LENGTH (don't redeclare as local)
+            local RESULT_CONTENT=$(cat RESULT.txt 2>/dev/null)
+            local TRUNCATION_SUFFIX="... (truncated, see RESULT.txt)"
+            local SUFFIX_LENGTH=${#TRUNCATION_SUFFIX}
+            local EFFECTIVE_LIMIT=$((SUMMARY_MAX_LENGTH - SUFFIX_LENGTH))
+            
+            if [[ ${#RESULT_CONTENT} -gt $EFFECTIVE_LIMIT ]]; then
+                local SUMMARY="${RESULT_CONTENT:0:$EFFECTIVE_LIMIT}${TRUNCATION_SUFFIX}"
+            else
+                local SUMMARY="$RESULT_CONTENT"
             fi
             echo "$SUMMARY" > SUMMARY.txt
         fi
@@ -298,12 +303,14 @@ if usage:
             # Always ensure RESULT.txt and SUMMARY.txt are included
             local ALL_FILES=$(ls -1 "$TASK_DIR" 2>/dev/null)
             if ! echo "$ALL_FILES" | grep -q "^RESULT\.txt$"; then
-                ALL_FILES="RESULT.txt (expected)${ALL_FILES:+\\n}$ALL_FILES"
+                ALL_FILES="RESULT.txt (expected)
+$ALL_FILES"
             fi
             if ! echo "$ALL_FILES" | grep -q "^SUMMARY\.txt$"; then
-                ALL_FILES="SUMMARY.txt${ALL_FILES:+\\n}$ALL_FILES"
+                ALL_FILES="SUMMARY.txt
+$ALL_FILES"
             fi
-            local FILES=$(echo -e "$ALL_FILES" | tr '\n' ', ' | sed 's/, $//; s/,/, /g')
+            local FILES=$(echo "$ALL_FILES" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
             
             # Build message - use actual newlines which jq will handle
             local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Result:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
