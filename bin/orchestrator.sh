@@ -266,37 +266,89 @@ if usage:
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
                 "${TASK_DESC:0:500}" "${RESULT:0:800}" "$FILES" "$TASK_DIR")
             
-            # Post to Discord using jq to properly format JSON
-            echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$MSG" '.content = $msg' | \
-                curl -s -X POST \
-                -H "Authorization: Bot ${BOT_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d @- \
-                "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || echo "Failed to post result" >> agent-output.log
+            # Post to Discord with retry logic (exponential backoff)
+            local RETRY_COUNT=0
+            local MAX_RETRIES=5
+            local POST_SUCCESS=0
+            
+            while [[ $RETRY_COUNT -lt $MAX_RETRIES ]] && [[ $POST_SUCCESS -eq 0 ]]; do
+                local RESPONSE
+                RESPONSE=$(echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$MSG" '.content = $msg' | \
+                    curl -s -w "\n%{http_code}" \
+                    -X POST \
+                    -H "Authorization: Bot ${BOT_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d @- \
+                    "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" 2>/dev/null)
+                
+                local HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+                
+                if [[ "$HTTP_CODE" == "200" ]] || [[ "$HTTP_CODE" == "201" ]]; then
+                    POST_SUCCESS=1
+                else
+                    RETRY_COUNT=$((RETRY_COUNT + 1))
+                    local DELAY=$((2 ** RETRY_COUNT))  # Exponential: 2, 4, 8, 16, 32 seconds
+                    echo "[$(date '+%H:%M:%S')] Discord post failed (HTTP $HTTP_CODE), retry $RETRY_COUNT/$MAX_RETRIES in ${DELAY}s..." >> agent-output.log
+                    sleep $DELAY
+                fi
+            done
+            
+            if [[ $POST_SUCCESS -eq 0 ]]; then
+                echo "[$(date '+%H:%M:%S')] Failed to post result after $MAX_RETRIES attempts" >> agent-output.log
+            fi
         else
             # Post failure with nice formatting
             local FAIL_MSG=$(printf '═══════════════════════════════════════\n\n**[FAILED]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s\n\n**Task:**\n```\n%s\n```\n\n❌ **No result produced**' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "${TASK_DESC:0:300}")
             
-            echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$FAIL_MSG" '.content = $msg' | \
-                curl -s -X POST \
-                -H "Authorization: Bot ${BOT_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d @- \
-                "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || true
+            # Post failure with retry
+            local FAIL_RETRY=0
+            local FAIL_SUCCESS=0
+            while [[ $FAIL_RETRY -lt $MAX_RETRIES ]] && [[ $FAIL_SUCCESS -eq 0 ]]; do
+                local FAIL_RESPONSE
+                FAIL_RESPONSE=$(echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$FAIL_MSG" '.content = $msg' | \
+                    curl -s -w "\n%{http_code}" \
+                    -X POST \
+                    -H "Authorization: Bot ${BOT_TOKEN}" \
+                    -H "Content-Type: application/json" \
+                    -d @- \
+                    "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" 2>/dev/null)
+                
+                local FAIL_HTTP=$(echo "$FAIL_RESPONSE" | tail -1)
+                if [[ "$FAIL_HTTP" == "200" ]] || [[ "$FAIL_HTTP" == "201" ]]; then
+                    FAIL_SUCCESS=1
+                else
+                    FAIL_RETRY=$((FAIL_RETRY + 1))
+                    sleep $((2 ** FAIL_RETRY))
+                fi
+            done
         fi
         
         # Cleanup
         rm -rf "$WORKER_STATE_DIR"
         
-        # Post completion notice (simple format, no jq needed)
+        # Post completion notice with retry
         local DONE_MSG="✅ Agent \`${AGENT_ID}\` finished"
-        echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$DONE_MSG" '.content = $msg' | \
-            curl -s -X POST \
-            -H "Authorization: Bot ${BOT_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d @- \
-            "https://discord.com/api/v10/channels/${WORKER_POOL_CHANNEL}/messages" > /dev/null 2>&1 || true
+        local DONE_RETRY=0
+        local DONE_SUCCESS=0
+        while [[ $DONE_RETRY -lt $MAX_RETRIES ]] && [[ $DONE_SUCCESS -eq 0 ]]; do
+            local DONE_RESPONSE
+            DONE_RESPONSE=$(echo '{"content":"PLACEHOLDER"}' | jq --arg msg "$DONE_MSG" '.content = $msg' | \
+                curl -s -w "\n%{http_code}" \
+                -X POST \
+                -H "Authorization: Bot ${BOT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d @- \
+                "https://discord.com/api/v10/channels/${WORKER_POOL_CHANNEL}/messages" 2>/dev/null)
+            
+            local DONE_HTTP=$(echo "$DONE_RESPONSE" | tail -1)
+            if [[ "$DONE_HTTP" == "200" ]] || [[ "$DONE_HTTP" == "201" ]]; then
+                DONE_SUCCESS=1
+            else
+                DONE_RETRY=$((DONE_RETRY + 1))
+                sleep $((2 ** DONE_RETRY))
+            fi
+        done
     ) &
     
     echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} spawned (PID: $!)"
