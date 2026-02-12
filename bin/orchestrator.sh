@@ -255,12 +255,11 @@ if usage:
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
             
-            # List files in workspace
-            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
-            
             # Build nicely formatted Discord message (like old system)
             local DISPLAY_COST="${COST:-N/A}"
-            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
+            
+            # List files with proper spacing (comma + space between each)
+            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | tr '\n' ', ' | sed 's/, $//; s/,/, /g')
             
             # Build message - use actual newlines which jq will handle
             local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Result:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
