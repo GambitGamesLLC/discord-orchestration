@@ -313,7 +313,7 @@ $ALL_FILES"
             local FILES=$(echo "$ALL_FILES" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
             
             # Build message - use actual newlines which jq will handle
-            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Result:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
+            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Summary:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
                 "${TASK_DESC:0:500}" "${POST_CONTENT:0:800}" "$FILES" "$TASK_DIR")
             
