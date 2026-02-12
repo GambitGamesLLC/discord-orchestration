@@ -197,17 +197,23 @@ EOF
         export TASK_DESC="${TASK_DESC}"
         export TASK_DIR="${TASK_DIR}"
         export WORKER_STATE_DIR="${WORKER_STATE_DIR}"
+        export TIMEOUT="${TIMEOUT:-}"  # Pass through custom timeout if set
         
         cd "$TASK_DIR"
         
-        # Set timeout based on thinking level (high = 5 min, others = 2 min)
-        local TIMEOUT=120
-        if [[ "${THINKING}" == "high" ]]; then
-            TIMEOUT=300
+        # Set timeout: Use passed TIMEOUT, or default based on thinking level
+        # Default: 120s for low/medium, 300s for high thinking
+        local AGENT_TIMEOUT="${TIMEOUT:-}"
+        if [[ -z "$AGENT_TIMEOUT" ]]; then
+            if [[ "${THINKING}" == "high" ]]; then
+                AGENT_TIMEOUT=300
+            else
+                AGENT_TIMEOUT=120
+            fi
         fi
         
         # Run agent (EXACT command from old workers)
-        timeout $TIMEOUT openclaw agent \
+        timeout $AGENT_TIMEOUT openclaw agent \
             --session-id "${AGENT_ID}-${TASK_ID}" \
             --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
             --thinking "${THINKING}" \

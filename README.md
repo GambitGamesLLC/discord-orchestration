@@ -86,6 +86,24 @@ This will:
 
 Or run manually whenever you have tasks queued.
 
+### 6. Custom Timeout (Optional)
+
+By default, agents timeout after:
+- **120 seconds** for `low` or `medium` thinking
+- **300 seconds** (5 minutes) for `high` thinking
+
+You can override this with the `TIMEOUT` environment variable:
+
+```bash
+# 10 minute timeout for all tasks
+TIMEOUT=600 ./bin/orchestrator.sh
+
+# 1 hour for extremely complex tasks
+TIMEOUT=3600 ./bin/orchestrator.sh
+```
+
+**Note:** The timeout is per-agent. If you have 5 tasks, each agent gets the full timeout.
+
 ## File Structure
 
 ```
