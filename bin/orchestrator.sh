@@ -320,14 +320,7 @@ if usage:
             fi
         fi
         
-        # Sanitize content for Discord markdown (prevent triple backtick issues)
-        sanitize_for_discord() {
-            local content="$1"
-            # Replace triple backticks with tilde-equivalent to prevent breaking code blocks
-            # Use ~~~ as alternative fence - Discord supports this
-            content="${content//\`\`\`/~~~}"
-            echo "$content"
-        }
+        # Note: Using 4-backtick fences (````) so inner ``` renders correctly
         
         # FALLBACK: Generate SUMMARY.txt only if worker didn't create it
         # Workers SHOULD write their own SUMMARY.txt per AGENTS.md instructions
@@ -344,8 +337,6 @@ if usage:
             else
                 local SUMMARY="$RESULT_CONTENT"
             fi
-            # Sanitize for Discord before writing
-            SUMMARY=$(sanitize_for_discord "$SUMMARY")
             echo "$SUMMARY" > SUMMARY.txt
         fi
         
@@ -379,14 +370,10 @@ $ALL_FILES"
             fi
             local FILES=$(echo "$ALL_FILES" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
             
-            # Sanitize content for Discord posting
-            POST_CONTENT=$(sanitize_for_discord "$POST_CONTENT")
-            local SAFE_TASK_DESC=$(sanitize_for_discord "${TASK_DESC:0:500}")
-            
-            # Build message - use tildes (~~~) for code blocks to avoid backtick conflicts
-            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n~~~\n%s\n~~~\n\n**Summary:**\n~~~\n%s\n~~~\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
+            # Build message - use 4 backticks for outer fence so inner ``` works
+            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n````\n%s\n````\n\n**Summary:**\n````\n%s\n````\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
-                "$SAFE_TASK_DESC" "${POST_CONTENT:0:800}" "$FILES" "$TASK_DIR")
+                "${TASK_DESC:0:500}" "${POST_CONTENT:0:800}" "$FILES" "$TASK_DIR")
             
             # Post to Discord with retry logic (exponential backoff)
             local RETRY_COUNT=0
@@ -419,9 +406,8 @@ $ALL_FILES"
             fi
         else
             # Post failure with nice formatting
-            local SAFE_FAIL_DESC=$(sanitize_for_discord "${TASK_DESC:0:300}")
-            local FAIL_MSG=$(printf '═══════════════════════════════════════\n\n**[FAILED]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s\n\n**Task:**\n~~~\n%s\n~~~\n\n❌ **No result produced**' \
-                "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$SAFE_FAIL_DESC")
+            local FAIL_MSG=$(printf '═══════════════════════════════════════\n\n**[FAILED]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s\n\n**Task:**\n````\n%s\n````\n\n❌ **No result produced**' \
+                "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "${TASK_DESC:0:300}")
             
             # Post failure with retry
             local FAIL_RETRY=0
