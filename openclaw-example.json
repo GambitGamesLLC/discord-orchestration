@@ -1,0 +1,120 @@
+{
+  "env": {
+    "OPENROUTER_API_KEY": "sk-or-v1-YOUR-OPENROUTER-API-KEY-HERE"
+  },
+  "models": {
+    "providers": {
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "moonshotai/kimi-k2.5",
+            "name": "Kimi K2.5",
+            "contextWindow": 262001,
+            "maxTokens": 262001,
+            "reasoning": true,
+            "cost": {
+              "input": 0.00045,
+              "output": 0.00225,
+              "cacheRead": 0.00007,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "qwen/qwen3-coder-next",
+            "name": "Qwen 3 Coder",
+            "contextWindow": 262001,
+            "maxTokens": 262001,
+            "reasoning": true,
+            "cost": {
+              "input": 0.00015,
+              "output": 0.0008,
+              "cacheRead": 0.00,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "stepfun/step-3.5-flash:free",
+            "name": "Step 3.5 Flash (Free)",
+            "contextWindow": 256000,
+            "maxTokens": 256000,
+            "cost": {
+              "input": 0.00,
+              "output": 0.00,
+              "cacheRead": 0.00,
+              "cacheWrite": 0.00
+            }
+          },
+          {
+            "id": "google/gemini-3-pro-preview",
+            "name": "Gemini 3 Pro",
+            "contextWindow": 1000005,
+            "maxTokens": 65500,
+            "cost": {
+              "input": 0.002,
+              "output": 0.012,
+              "cacheRead": 0.0002,
+              "cacheWrite": 0.00
+            }
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "thinkingDefault": "medium",
+      "workspace": "/path/to/your/workspace",
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "model": {
+        "primary": "openrouter/moonshotai/kimi-k2.5"
+      },
+      "models": {
+        "openrouter/moonshotai/kimi-k2.5": {
+          "alias": "primary"
+        },
+        "openrouter/qwen/qwen3-coder-next": {
+          "alias": "coder"
+        },
+        "openrouter/stepfun/step-3.5-flash:free": {
+          "alias": "cheap"
+        },
+        "openrouter/google/gemini-3-pro-preview": {
+          "alias": "research"
+        }
+      }
+    }
+  },
+  "tools": {
+    "web": {
+      "search": {
+        "enabled": true,
+        "apiKey": "YOUR-BRAVE-SEARCH-API-KEY"
+      },
+      "fetch": {
+        "enabled": true
+      }
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "YOUR-DISCORD-BOT-TOKEN",
+      "allowBots": true,
+      "groupPolicy": "open"
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "YOUR-GATEWAY-AUTH-TOKEN"
+    }
+  }
+}
