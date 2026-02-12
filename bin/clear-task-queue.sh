@@ -9,7 +9,7 @@ source ./discord-config.env 2>/dev/null || {
 
 echo "Fetching messages from #task-queue..."
 
-MESSAGES=$(curl -s -H "Authorization: Bot ${CHIP_TOKEN}" \
+MESSAGES=$(curl -s -H "Authorization: Bot ${ORCHESTRATOR_AGENT_TOKEN}" \
     "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages?limit=100")
 
 MSG_COUNT=$(echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | wc -l)
@@ -25,7 +25,7 @@ echo "Deleting messages..."
 echo "$MESSAGES" | grep -o '"id":"[0-9]*"' | sed 's/"id":"//;s/"$//' | while read -r MSG_ID; do
     echo -n "."
     curl -s -X DELETE \
-        -H "Authorization: Bot ${CHIP_TOKEN}" \
+        -H "Authorization: Bot ${ORCHESTRATOR_AGENT_TOKEN}" \
         "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages/${MSG_ID}" \
         > /dev/null 2>&1
     sleep 0.5  # Rate limit protection

@@ -31,7 +31,7 @@ echo "Get these from: https://discord.com/developers/applications"
 echo "(Bot → Reset Token or Copy)"
 echo ""
 
-read -p "Chip (Orchestrator) Bot Token: " CHIP_TOKEN
+read -p "Orchestrator Agent Bot Token: " ORCHESTRATOR_AGENT_TOKEN
 read -p "Worker-1 Bot Token: " WORKER1_TOKEN
 read -p "Worker-2 Bot Token: " WORKER2_TOKEN
 read -p "Worker-3 Bot Token: " WORKER3_TOKEN
@@ -59,7 +59,7 @@ cat > "$CONFIG_FILE" << EOF
 # Generated: $(date)
 
 # Bot Tokens (KEEP SECRET!)
-CHIP_TOKEN="${CHIP_TOKEN}"
+ORCHESTRATOR_AGENT_TOKEN="${ORCHESTRATOR_AGENT_TOKEN}"
 WORKER1_TOKEN="${WORKER1_TOKEN}"
 WORKER2_TOKEN="${WORKER2_TOKEN}"
 WORKER3_TOKEN="${WORKER3_TOKEN}"

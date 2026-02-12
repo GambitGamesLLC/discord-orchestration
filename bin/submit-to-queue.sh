@@ -30,10 +30,10 @@ echo "  Task: ${TASK:0:50}..."
 [[ -n "$THINKING" ]] && echo "  Thinking: $THINKING"
 echo ""
 
-if [[ -n "${CHIP_TOKEN:-}" && -n "${TASK_QUEUE_CHANNEL:-}" ]]; then
+if [[ -n "${ORCHESTRATOR_AGENT_TOKEN:-}" && -n "${TASK_QUEUE_CHANNEL:-}" ]]; then
     # Submit task and get the message ID (which becomes the task ID)
     RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bot ${CHIP_TOKEN}" \
+        -H "Authorization: Bot ${ORCHESTRATOR_AGENT_TOKEN}" \
         -H "Content-Type: application/json" \
         -d "{\"content\":\"${TASK}\"}" \
         "https://discord.com/api/v10/channels/${TASK_QUEUE_CHANNEL}/messages" 2>/dev/null)
