@@ -178,7 +178,7 @@ EOF
 TASK: ${TASK_DESC}
 EOF
     
-    # Post notice
+    # Post notice (outside subshell so discord_api works)
     discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
         "{\"content\":\"🤖 **AGENT SPAWNED**\\nTask: ${TASK_DESC:0:60}...\\nAgent: \`${AGENT_ID}\`\"}" > /dev/null 2>&1 || true
     
@@ -240,6 +240,17 @@ if usage:
             fi
         fi
         
+        # Function to post to Discord (defined in subshell since functions aren't inherited)
+        post_discord() {
+            local CHANNEL="$1"
+            local DATA="$2"
+            curl -s -X POST \
+                -H "Authorization: Bot ${BOT_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d "$DATA" \
+                "https://discord.com/api/v10/channels/${CHANNEL}/messages" > /dev/null 2>&1 || true
+        }
+        
         # Check for result
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
@@ -267,17 +278,15 @@ ${RESULT:0:800}
 
 📁 **Workspace:** \`${TASK_DIR}\`"
             
-            discord_api POST "/channels/${RESULTS_CHANNEL}/messages" "{\"content\":\"${MSG}\"}" > /dev/null 2>&1 || true
+            post_discord "${RESULTS_CHANNEL}" "{\"content\":\"${MSG}\"}"
         else
-            discord_api POST "/channels/${RESULTS_CHANNEL}/messages" \
-                "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result produced\"}" > /dev/null 2>&1 || true
+            post_discord "${RESULTS_CHANNEL}" "{\"content\":\"❌ **FAILED** \`${TASK_ID}\` - No result produced\"}"
         fi
         
         # Cleanup
         rm -rf "$WORKER_STATE_DIR"
         
-        discord_api POST "/channels/${WORKER_POOL_CHANNEL}/messages" \
-            "{\"content\":\"✅ Agent \`${AGENT_ID}\` finished\"}" > /dev/null 2>&1 || true
+        post_discord "${WORKER_POOL_CHANNEL}" "{\"content\":\"✅ Agent \`${AGENT_ID}\` finished\"}"
     ) &
     
     echo "[$(date '+%H:%M:%S')] Agent ${AGENT_ID} spawned (PID: $!)"
