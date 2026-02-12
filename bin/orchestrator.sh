@@ -218,6 +218,9 @@ EOF
         cp "${WORKERS_DIR}/TOOLS.md" "${WORKER_STATE_DIR}/TOOLS.md"
     fi
     
+    # Copy AGENTS.md to task dir so agent finds it (agent runs from TASK_DIR)
+    cp "${WORKER_STATE_DIR}/AGENTS.md" "${TASK_DIR}/AGENTS.md"
+    
     # Write TASK.txt (like old workers)
     cat > "${TASK_DIR}/TASK.txt" << EOF
 TASK: ${TASK_DESC}
