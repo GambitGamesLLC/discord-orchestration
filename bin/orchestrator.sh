@@ -200,6 +200,7 @@ EOF
         export TASK_DIR="${TASK_DIR}"
         export WORKER_STATE_DIR="${WORKER_STATE_DIR}"
         export TIMEOUT="${TIMEOUT:-}"  # Pass through custom timeout if set
+        export SUMMARY_MAX_LENGTH="${SUMMARY_MAX_LENGTH:-2000}"  # Summary truncation limit
         
         cd "$TASK_DIR"
         
@@ -265,23 +266,49 @@ if usage:
             fi
         fi
         
+        # Generate SUMMARY.txt after RESULT.txt
+        if [[ -f "RESULT.txt" ]]; then
+            local SUMMARY_MAX_LENGTH="${SUMMARY_MAX_LENGTH:-2000}"
+            local RESULT=$(cat RESULT.txt 2>/dev/null)
+            local SUMMARY="${RESULT:0:$SUMMARY_MAX_LENGTH}"
+            if [[ ${#RESULT} -gt $SUMMARY_MAX_LENGTH ]]; then
+                SUMMARY="${SUMMARY}... (truncated, see RESULT.txt)"
+            fi
+            echo "$SUMMARY" > SUMMARY.txt
+        fi
+        
         # Check for result and post to Discord
         # Common retry settings for both success and failure
         local MAX_RETRIES=5
         
         if [[ -f "RESULT.txt" ]]; then
             local RESULT=$(cat RESULT.txt 2>/dev/null)
+            # Use SUMMARY.txt content if available, fall back to RESULT.txt
+            local POST_CONTENT
+            if [[ -f "SUMMARY.txt" ]]; then
+                POST_CONTENT=$(cat SUMMARY.txt 2>/dev/null)
+            else
+                POST_CONTENT="$RESULT"
+            fi
             
             # Build nicely formatted Discord message (like old system)
             local DISPLAY_COST="${COST:-N/A}"
             
             # List files with proper spacing (comma + space between each)
-            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | tr '\n' ', ' | sed 's/, $//; s/,/, /g')
+            # Always ensure RESULT.txt and SUMMARY.txt are included
+            local ALL_FILES=$(ls -1 "$TASK_DIR" 2>/dev/null)
+            if ! echo "$ALL_FILES" | grep -q "^RESULT\.txt$"; then
+                ALL_FILES="RESULT.txt (expected)${ALL_FILES:+\\n}$ALL_FILES"
+            fi
+            if ! echo "$ALL_FILES" | grep -q "^SUMMARY\.txt$"; then
+                ALL_FILES="SUMMARY.txt${ALL_FILES:+\\n}$ALL_FILES"
+            fi
+            local FILES=$(echo -e "$ALL_FILES" | tr '\n' ', ' | sed 's/, $//; s/,/, /g')
             
             # Build message - use actual newlines which jq will handle
             local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n```\n%s\n```\n\n**Result:**\n```\n%s\n```\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
-                "${TASK_DESC:0:500}" "${RESULT:0:800}" "$FILES" "$TASK_DIR")
+                "${TASK_DESC:0:500}" "${POST_CONTENT:0:800}" "$FILES" "$TASK_DIR")
             
             # Post to Discord with retry logic (exponential backoff)
             local RETRY_COUNT=0
