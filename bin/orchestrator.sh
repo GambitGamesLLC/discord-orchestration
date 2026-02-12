@@ -258,9 +258,28 @@ if usage:
             # List files in workspace
             local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
             
-            # Build Discord message
+            # Build nicely formatted Discord message (like old system)
             local DISPLAY_COST="${COST:-N/A}"
-            local MSG="✅ SUCCESS ${TASK_ID:0:16}... by ${AGENT_ID} | Model: ${MODEL_FLAG} | Tokens: ${TOKENS_IN}/${TOKENS_OUT} | Cost: ${DISPLAY_COST} | Result: ${RESULT:0:100}"
+            local FILES=$(ls -1 "$TASK_DIR" 2>/dev/null | paste -sd ', ' -)
+            
+            # Build message with proper Discord formatting
+            local MSG="═══════════════════════════════════════
+
+**[SUCCESS]** \`${TASK_ID}\` by **${AGENT_ID}**
+**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING} | **Tokens:** ${TOKENS_IN} in / ${TOKENS_OUT} out | **Cost:** \$${DISPLAY_COST}
+
+**Task Prompt:**
+\`\`\`
+${TASK_DESC:0:500}${TASK_DESC:500:+...}
+\`\`\`
+
+**Result:**
+\`\`\`
+${RESULT:0:800}${RESULT:800:+...}
+\`\`\`
+**Files:** ${FILES}
+
+📁 **Workspace:** \`${TASK_DIR}\`"
             
             # Post to Discord
             curl -s -X POST \
@@ -269,11 +288,23 @@ if usage:
                 -d "{\"content\":\"${MSG}\"}" \
                 "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || echo "Failed to post result" >> agent-output.log
         else
-            # Post failure
+            # Post failure with nice formatting
+            local FAIL_MSG="═══════════════════════════════════════
+
+**[FAILED]** \`${TASK_ID}\` by **${AGENT_ID}**
+**Model:** ${MODEL_FLAG} | **Thinking:** ${THINKING}
+
+**Task:**
+\`\`\`
+${TASK_DESC:0:300}${TASK_DESC:300:+...}
+\`\`\`
+
+❌ **No result produced**"
+            
             curl -s -X POST \
                 -H "Authorization: Bot ${BOT_TOKEN}" \
                 -H "Content-Type: application/json" \
-                -d "{\"content\":\"❌ FAILED ${TASK_ID:0:16}... - No result produced\"}" \
+                -d "{\"content\":\"${FAIL_MSG}\"}" \
                 "https://discord.com/api/v10/channels/${RESULTS_CHANNEL}/messages" > /dev/null 2>&1 || true
         fi
         
