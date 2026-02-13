@@ -191,6 +191,14 @@ EOF
 ## Task
 ${TASK_DESC}
 
+## ⚠️ CRITICAL: English Only
+**ALL output must be in English.**
+- Respond in English only
+- If researching non-English sources, translate findings to English
+- System locale: en_US.UTF-8
+
+This ensures consistent communication with the orchestrator and user.
+
 ## Model Defaults
 - Primary: openrouter/moonshotai/kimi-k2.5
 - Cheap: openrouter/stepfun/step-3.5-flash:free
