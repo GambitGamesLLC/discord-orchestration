@@ -24,6 +24,11 @@ TASK_QUEUE_CHANNEL="${TASK_QUEUE_CHANNEL:-}"
 RESULTS_CHANNEL="${RESULTS_CHANNEL:-}"
 WORKER_POOL_CHANNEL="${WORKER_POOL_CHANNEL:-}"
 
+# Worker retention policy (hours)
+# Successful workers are auto-deleted after this time
+# Failed workers are preserved for manual investigation
+WORKER_RETENTION_HOURS="${WORKER_RETENTION_HOURS:-24}"
+
 # Runtime tracking
 RUNTIME_DIR="${REPO_DIR}/.runtime"
 ASSIGNED_FILE="${RUNTIME_DIR}/assigned-tasks.txt"
@@ -448,8 +453,25 @@ $ALL_FILES"
             done
         fi
         
-        # Cleanup
-        rm -rf "$WORKER_STATE_DIR"
+        # Retention Policy: Success = schedule deletion, Fail = preserve for debugging
+        if [[ -f "RESULT.txt" ]]; then
+            # SUCCESS: Schedule auto-deletion after retention period
+            local RETENTION_HOURS="${WORKER_RETENTION_HOURS:-24}"
+            local DELETE_TIME=$(date -d "+${RETENTION_HOURS} hours" "+%H:%M %Y-%m-%d" 2>/dev/null || date -v+${RETENTION_HOURS}H "+%H:%M %Y-%m-%d" 2>/dev/null || echo "+${RETENTION_HOURS} hours")
+            
+            # Use 'at' for one-time scheduled deletion (gracefully handles already-deleted files)
+            if command -v at &> /dev/null; then
+                echo "rm -rf '$WORKER_STATE_DIR' 2>/dev/null || true" | at "$DELETE_TIME" 2>/dev/null || true
+                echo "[$(date '+%H:%M:%S')] Scheduled deletion at $DELETE_TIME (${RETENTION_HOURS}h retention)" >> agent-output.log
+            else
+                # Fallback: nohup + sleep in background (handles missing files gracefully)
+                (sleep $((RETENTION_HOURS * 3600)) && rm -rf "$WORKER_STATE_DIR" 2>/dev/null) &
+                echo "[$(date '+%H:%M:%S')] Scheduled deletion in ${RETENTION_HOURS}h (background process)" >> agent-output.log
+            fi
+        else
+            # FAILURE: Preserve workspace for manual investigation
+            echo "[$(date '+%H:%M:%S')] PRESERVED: No RESULT.txt - workspace kept for debugging: $WORKER_STATE_DIR" >> agent-output.log
+        fi
         
         # Post completion notice with retry
         local DONE_MSG="✅ Agent \`${AGENT_ID}\` finished"
