@@ -386,8 +386,8 @@ $ALL_FILES"
             fi
             local FILES=$(echo "$ALL_FILES" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
             
-            # Build message - use 4 backticks for outer fence so inner ``` works
-            local MSG=$(printf '═══════════════════════════════════════\n\n**[SUCCESS]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s | **Tokens:** %s in / %s out | **Cost:** $%s\n\n**Task Prompt:**\n````\n%s\n````\n\n**Summary:**\n````\n%s\n````\n**Files:** %s\n\n📁 **Workspace:** `%s`' \
+            # Build message - single code block for easy copy/paste
+            local MSG=$(printf '```\n[SUCCESS] %s by %s\nModel: %s | Thinking: %s | Tokens: %s in / %s out | Cost: $%s\n\nTask Prompt:\n%s\n\nSummary:\n%s\n\nFiles: %s\nWorkspace: %s\n```' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "$TOKENS_IN" "$TOKENS_OUT" "$DISPLAY_COST" \
                 "${TASK_DESC:0:500}" "${POST_CONTENT:0:800}" "$FILES" "$TASK_DIR")
             
@@ -422,7 +422,7 @@ $ALL_FILES"
             fi
         else
             # Post failure with nice formatting
-            local FAIL_MSG=$(printf '═══════════════════════════════════════\n\n**[FAILED]** `%s` by **%s**\n**Model:** %s | **Thinking:** %s\n\n**Task:**\n````\n%s\n````\n\n❌ **No result produced**' \
+            local FAIL_MSG=$(printf '```\n[FAILED] %s by %s\nModel: %s | Thinking: %s\n\nTask:\n%s\n\n❌ No result produced\n```' \
                 "$TASK_ID" "$AGENT_ID" "$MODEL_FLAG" "$THINKING" "${TASK_DESC:0:300}")
             
             # Post failure with retry
