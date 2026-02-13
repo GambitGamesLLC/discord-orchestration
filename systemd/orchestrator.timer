@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Discord Orchestrator every minute
+Requires=orchestrator.service
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

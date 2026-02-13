@@ -346,13 +346,55 @@ with code blocks containing backticks.
 
 ### Running the Orchestrator
 
+The orchestrator can run in several modes:
+
+#### Option 1: Systemd Timer + Oneshot (Recommended)
+
+Installs as a user service that runs every minute with proper health monitoring:
+
+```bash
+# Install and start the systemd timer
+./bin/install-systemd.sh
+
+# Check status
+systemctl --user status orchestrator.timer
+
+# View logs
+journalctl --user -u orchestrator.service -f
+
+# Stop temporarily
+systemctl --user stop orchestrator.timer
+
+# Disable (stop auto-start on boot)
+systemctl --user disable orchestrator.timer
+```
+
+**Benefits:**
+- Automatic health reporting to systemd journal
+- Clean status visibility (`systemctl status`)
+- Auto-restart if the service fails
+- Dependency on OpenClaw Gateway (waits for it to be ready)
+- Logs rotate automatically via journald
+
+#### Option 2: Manual (One-time)
+
+For testing or ad-hoc execution:
+
 ```bash
 # Run once
 ./bin/orchestrator.sh
-
-# Run continuously (cron)
-*/1 * * * * cd /path/to/discord-orchestration && ./bin/orchestrator.sh >> /tmp/orchestrator.log 2>&1
 ```
+
+#### Option 3: Cron (Legacy)
+
+If you prefer cron over systemd:
+
+```bash
+# Run continuously (cron)
+*/1 * * * * cd /path/to/discord-orchestration && flock -n /tmp/orchestrator.lock -c './bin/orchestrator.sh >> /tmp/orchestrator.log 2>&1'
+```
+
+**Note:** Uses `flock` to prevent overlapping runs.
 
 ### Understanding SUMMARY.txt
 
@@ -384,6 +426,39 @@ When a worker completes a task, it writes TWO files:
 ```bash
 SUMMARY_MAX_LENGTH=500 ./bin/orchestrator.sh  # Shorter summaries
 SUMMARY_MAX_LENGTH=4000 ./bin/orchestrator.sh # Longer summaries
+```
+
+### Health Monitoring
+
+The orchestrator reports its own health status on every run:
+
+**What it checks:**
+- Discord bot token configured
+- Channel IDs set (task-queue, results, worker-pool)
+- OpenClaw Gateway reachable at `127.0.0.1:18789`
+- Task completion status
+
+**Viewing health logs:**
+```bash
+# Systemd mode (recommended)
+journalctl --user -u orchestrator.service -f | grep ORCHESTRATOR_HEALTH
+
+# Manual mode
+./bin/orchestrator.sh 2>&1 | grep ORCHESTRATOR_HEALTH
+```
+
+**Health states:**
+| Status | Meaning |
+|--------|---------|
+| `healthy` | All checks passed, ready to process tasks |
+| `unhealthy` | Configuration or dependency issue detected |
+| `complete` | Run finished, all agents spawned successfully |
+
+**Integration with your orchestrator agent:**
+Your orchestrator agent (Cookie/Chip) can verify the timer is running:
+```bash
+# Check if timer is active
+systemctl --user is-active orchestrator.timer || systemctl --user start orchestrator.timer
 ```
 
 ### Discord Markdown Sanitization

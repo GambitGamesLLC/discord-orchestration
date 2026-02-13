@@ -1,0 +1,30 @@
+[Unit]
+Description=Discord Orchestrator - Dynamic Agent Spawner
+After=openclaw-gateway.service
+Wants=openclaw-gateway.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/derrick/Documents/GitHub/discord-orchestration/bin/orchestrator.sh
+WorkingDirectory=/home/derrick/Documents/GitHub/discord-orchestration
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=discord-orchestrator
+
+# Environment - ensure openclaw and other tools are in PATH
+Environment="PATH=/home/derrick/.npm-global/bin:/home/derrick/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HOME=/home/derrick"
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=no
+ProtectHome=no
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+TimeoutSec=300
+
+# Restart policy - don't restart oneshot automatically, timer handles next run
+[Install]
+WantedBy=default.target

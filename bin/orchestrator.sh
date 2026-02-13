@@ -37,6 +37,54 @@ mkdir -p "$RUNTIME_DIR"
 WORKERS_DIR="${REPO_DIR}/workers"
 mkdir -p "$WORKERS_DIR"
 
+# Health check reporting function
+report_health() {
+    local STATUS="${1:-unknown}"
+    local MESSAGE="${2:-}"
+    
+    echo "[$(date '+%H:%M:%S')] ORCHESTRATOR_HEALTH: status=${STATUS} ${MESSAGE}"
+    
+    # Log to systemd journal if available
+    if command -v systemd-cat &>/dev/null; then
+        echo "Discord Orchestrator: status=${STATUS} ${MESSAGE}" | systemd-cat -t discord-orchestrator -p info
+    fi
+}
+
+# Self-check: verify this orchestrator instance is properly configured
+check_orchestrator_health() {
+    local ISSUES=()
+    
+    # Check config loaded
+    if [[ -z "$BOT_TOKEN" ]]; then
+        ISSUES+=("BOT_TOKEN not set - check discord-config.env")
+    fi
+    
+    if [[ -z "$TASK_QUEUE_CHANNEL" ]]; then
+        ISSUES+=("TASK_QUEUE_CHANNEL not set")
+    fi
+    
+    if [[ -z "$RESULTS_CHANNEL" ]]; then
+        ISSUES+=("RESULTS_CHANNEL not set")
+    fi
+    
+    # Check Gateway is reachable
+    if ! curl -s http://127.0.0.1:18789/health &>/dev/null; then
+        ISSUES+=("OpenClaw Gateway not reachable at :18789")
+    fi
+    
+    # Report status
+    if [[ ${#ISSUES[@]} -eq 0 ]]; then
+        report_health "healthy" "All systems operational"
+        return 0
+    else
+        report_health "unhealthy" "Issues: ${ISSUES[*]}"
+        return 1
+    fi
+}
+
+# Run health check at startup
+check_orchestrator_health || true
+
 # Discord API helper
 discord_api() {
     local METHOD="$1"
@@ -561,3 +609,7 @@ for PID in $AGENT_PIDS; do
 done
 
 echo "[$(date '+%H:%M:%S')] All agents finished."
+
+# Final health report
+COMPLETED_COUNT=$(echo "$AGENT_PIDS" | wc -w)
+report_health "complete" "Processed ${COMPLETED_COUNT} tasks, all agents finished"
