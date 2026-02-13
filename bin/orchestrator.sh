@@ -281,10 +281,23 @@ EOF
         local TOKENS_OUT="unknown"
         local COST="N/A"
         
-        local SESSION_FILE="${HOME}/.openclaw/agents/main/sessions/${AGENT_ID}-${TASK_ID}.jsonl"
+        # OPENCLAW_STATE_DIR changes where session files are stored
+        local STATE_DIR="${OPENCLAW_STATE_DIR:-${HOME}/.openclaw}"
+        local SESSION_FILE="${STATE_DIR}/agents/main/sessions/${AGENT_ID}-${TASK_ID}.jsonl"
+        
+        # Wait for session file to be written (retry up to 10 times, 500ms delay)
+        local SESSION_RETRY=0
+        while [[ ! -f "$SESSION_FILE" ]] && [[ $SESSION_RETRY -lt 10 ]]; do
+            sleep 0.5
+            SESSION_RETRY=$((SESSION_RETRY + 1))
+        done
+        
         if [[ -f "$SESSION_FILE" ]]; then
+            # Additional wait for file to be fully written
+            sleep 0.5
+            
             local TOKENS_JSON
-            TOKENS_JSON=$(tail -20 "$SESSION_FILE" 2>/dev/null | python3 -c "
+            TOKENS_JSON=$(tail -50 "$SESSION_FILE" 2>/dev/null | python3 -c "
 import json,sys
 usage = None
 for line in sys.stdin:
@@ -306,6 +319,7 @@ if usage:
                 
                 # Calculate cost
                 if [[ "$TOKENS_IN" != "unknown" && "$TOKENS_OUT" != "unknown" ]]; then
+                    # Pricing is in main config, not isolated worker config
                     local CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
                     if [[ -f "$CONFIG_FILE" ]]; then
                         local MODEL_ID="${MODEL_FLAG#openrouter/}"
@@ -318,6 +332,8 @@ if usage:
                     fi
                 fi
             fi
+        else
+            echo "[$(date '+%H:%M:%S')] WARNING: Session file not found: $SESSION_FILE" >> agent-output.log
         fi
         
         # Note: Using 4-backtick fences (````) so inner ``` renders correctly
