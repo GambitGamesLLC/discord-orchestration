@@ -7,11 +7,13 @@ A production-ready multi-agent orchestration system using Discord as the message
 > The channel IDs shown in examples below (like `1470493473038663792`) are **PLACEHOLDERS**.
 > 
 > **Actual channel IDs** for your system are in:
+> 
 > ```bash
 > ~/Documents/GitHub/discord-orchestration/discord-config.env
 > ```
 > 
 > **Always source the config file before any Discord operations:**
+> 
 > ```bash
 > source ~/Documents/GitHub/discord-orchestration/discord-config.env
 > echo "Task queue: $TASK_QUEUE_CHANNEL"
@@ -259,6 +261,7 @@ In your Discord server, create three text channels:
 > ⭐ **THIS IS THE SOURCE OF TRUTH FOR CHANNEL IDs**  
 > All Discord operations use the IDs in this file.  
 > **Always source this file before submitting tasks:**
+> 
 > ```bash
 > source ~/Documents/GitHub/discord-orchestration/discord-config.env
 > ```
