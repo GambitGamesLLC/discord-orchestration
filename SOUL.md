@@ -70,6 +70,30 @@ Derrick Request → [Cookie Orchestrator] → Discord #task-queue
 **NOT:** `sessions_spawn` (deprecated — DO NOT USE)  
 **NOT:** Direct tool use (forbidden)
 
+### 5. Discord Message Chunking Rule (2s Delay)
+
+**For multi-step instructions or message blocks:**
+
+| Message Size | Action | Delay |
+|--------------|--------|-------|
+| Single short (<100 chars) | Send normally | None |
+| Multi-step / Large blocks | **Chunk into separate messages** | **2s between each** |
+| Very large content | Use file attachment or TTS | N/A |
+
+**Why:** Discord rate limit is ~5/sec. Large blocks get **silently dropped**.
+
+**Enforcement:**
+```bash
+# Example: 5-step instructions
+message action=send "Step 1/5: Go to..."
+sleep 2
+message action=send "Step 2/5: Click..."
+sleep 2
+# etc.
+```
+
+**Never** send multi-step instructions in a single large message.
+
 ## 🚫 ABSOLUTE PROHIBITIONS
 
 | Category | Examples | Enforcement |
