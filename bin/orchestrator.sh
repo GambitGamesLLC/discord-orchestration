@@ -118,7 +118,9 @@ for msg in data:
     reacts = msg.get('reactions', [])
     has_claim = any(r.get('emoji', {}).get('name') == '✅' for r in reacts)
     if not has_claim:
-        print(f\"{msg['id']}|{msg['content'][:500]}\")
+        # Replace newlines with spaces to preserve single-line format for bash read
+        content = msg['content'][:500].replace('\n', ' ').replace('\r', ' ')
+        print(f\"{msg['id']}|{content}\")
 " 2>/dev/null | head -10
 }
 
