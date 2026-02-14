@@ -14,6 +14,66 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Detect openclaw binary dynamically for cross-system compatibility
+detect_openclaw() {
+    # Priority order: explicit env var > 'which' > common paths
+    
+    # 1. Check if OPENCLAW_BIN is already set (user override)
+    if [[ -n "${OPENCLAW_BIN:-}" && -x "$OPENCLAW_BIN" ]]; then
+        echo "$OPENCLAW_BIN"
+        return 0
+    fi
+    
+    # 2. Try 'which' first (fastest if PATH is already set)
+    local WHICH_OPENCLAW
+    WHICH_OPENCLAW=$(command -v openclaw 2>/dev/null || true)
+    if [[ -n "$WHICH_OPENCLAW" && -x "$WHICH_OPENCLAW" ]]; then
+        echo "$WHICH_OPENCLAW"
+        return 0
+    fi
+    
+    # 3. Search common installation paths
+    local SEARCH_PATTERNS=(
+        # nvm (default and common versions)
+        "$HOME/.nvm/versions/node/*/bin/openclaw"
+        # npm global
+        "$HOME/.npm-global/bin/openclaw"
+        "$HOME/.local/bin/openclaw"
+        # fnm
+        "$HOME/.fnm/current/bin/openclaw"
+        # asdf
+        "$HOME/.asdf/shims/openclaw"
+        # volta
+        "$HOME/.volta/bin/openclaw"
+        # Homebrew (Linux and macOS)
+        "/home/linuxbrew/.linuxbrew/bin/openclaw"
+        "/opt/homebrew/bin/openclaw"
+        "/usr/local/bin/openclaw"
+        # System paths
+        "/usr/bin/openclaw"
+        "/opt/openclaw/bin/openclaw"
+    )
+    
+    for pattern in "${SEARCH_PATTERNS[@]}"; do
+        for path in $pattern; do  # Glob expansion
+            if [[ -x "$path" ]]; then
+                echo "$path"
+                return 0
+            fi
+        done
+    done
+    
+    # 4. Fallback to PATH lookup (may fail, but we tried)
+    echo "openclaw"
+    return 1
+}
+
+# Detect and store openclaw path globally
+OPENCLAW_BIN=$(detect_openclaw)
+OPENCLAW_DIR=$(dirname "$OPENCLAW_BIN" 2>/dev/null || echo "")
+
+[[ -x "$OPENCLAW_BIN" ]] && echo "[$(date '+%H:%M:%S')] Detected openclaw: $OPENCLAW_BIN"
+
 # Load config
 if [[ -f "${REPO_DIR}/discord-config.env" ]]; then
     source "${REPO_DIR}/discord-config.env"
@@ -297,6 +357,11 @@ EOF
     
     # Spawn agent in background (EXACT command from old workers)
     (
+        # Add detected openclaw directory to PATH (for systemd compatibility)
+        if [[ -n "$OPENCLAW_DIR" && -d "$OPENCLAW_DIR" ]]; then
+            export PATH="$OPENCLAW_DIR:$PATH"
+        fi
+        
         # Export all needed variables for result posting
         export OPENCLAW_MODEL="$MODEL_FLAG"
         export OPENCLAW_STATE_DIR="$WORKER_STATE_DIR"
@@ -332,8 +397,8 @@ EOF
             echo "[$(date '+%H:%M:%S')] PYTHONPATH extended: ${PYTHONPATH}" >> agent-output.log
         fi
         
-        # Run agent (EXACT command from old workers)
-        timeout $AGENT_TIMEOUT openclaw agent \
+        # Run agent using detected openclaw binary
+        timeout $AGENT_TIMEOUT "${OPENCLAW_BIN}" agent \
             --session-id "${AGENT_ID}-${TASK_ID}" \
             --message "Complete the task in TASK.txt. Write result to RESULT.txt in ${TASK_DIR}/" \
             --thinking "${THINKING}" \
